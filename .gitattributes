@@ -1,0 +1,223 @@
+###############################################################################
+# Auto detect text files and normalize line endings
+###############################################################################
+* text=auto eol=lf
+
+###############################################################################
+# Source Code
+###############################################################################
+*.c          text
+*.cpp        text
+*.cc         text
+*.h          text
+*.hpp        text
+
+*.java       text
+*.kt         text
+*.kts        text
+
+*.cs         text
+*.vb         text
+
+*.php        text
+*.go         text
+
+*.js         text
+*.jsx        text
+*.ts         text
+*.tsx        text
+
+*.dart       text
+
+*.py         text
+*.rb         text
+*.rs         text
+*.swift      text
+*.m          text
+*.mm         text
+
+###############################################################################
+# Web
+###############################################################################
+*.html       text
+*.htm        text
+*.css        text
+*.scss       text
+*.sass       text
+*.less       text
+
+*.json       text
+*.jsonc      text
+*.yaml       text
+*.yml        text
+*.xml        text
+*.toml       text
+*.ini        text
+*.env        text
+*.properties text
+
+###############################################################################
+# Shell
+###############################################################################
+*.sh         text eol=lf
+*.bash       text eol=lf
+*.zsh        text eol=lf
+*.ps1        text eol=crlf
+*.bat        text eol=crlf
+*.cmd        text eol=crlf
+
+###############################################################################
+# SQL
+###############################################################################
+*.sql        text
+
+###############################################################################
+# Markdown & Docs
+###############################################################################
+*.md         text
+*.txt        text
+*.csv        text
+*.log        text
+
+###############################################################################
+# Images
+###############################################################################
+*.png        binary
+*.jpg        binary
+*.jpeg       binary
+*.gif        binary
+*.bmp        binary
+*.webp       binary
+*.ico        binary
+*.svg        text
+
+###############################################################################
+# Fonts
+###############################################################################
+*.ttf        binary
+*.otf        binary
+*.woff       binary
+*.woff2      binary
+*.eot        binary
+
+###############################################################################
+# Archives
+###############################################################################
+*.zip        binary
+*.rar        binary
+*.7z         binary
+*.gz         binary
+*.tar        binary
+*.tgz        binary
+
+###############################################################################
+# Audio / Video
+###############################################################################
+*.mp3        binary
+*.wav        binary
+*.ogg        binary
+*.mp4        binary
+*.mov        binary
+*.avi        binary
+*.mkv        binary
+*.webm       binary
+
+###############################################################################
+# PDFs & Office
+###############################################################################
+*.pdf        binary
+*.doc        binary
+*.docx       binary
+*.xls        binary
+*.xlsx       binary
+*.ppt        binary
+*.pptx       binary
+
+###############################################################################
+# Certificates / Keys
+###############################################################################
+*.pem        text
+*.crt        text
+*.cer        text
+*.key        text
+*.p12        binary
+*.pfx        binary
+
+###############################################################################
+# Flutter
+###############################################################################
+pubspec.yaml text
+pubspec.lock text
+
+###############################################################################
+# Node.js
+###############################################################################
+package.json text
+package-lock.json text
+pnpm-lock.yaml text
+yarn.lock text
+
+###############################################################################
+# Laravel / PHP
+###############################################################################
+composer.json text
+composer.lock text
+artisan text
+
+###############################################################################
+# Docker
+###############################################################################
+Dockerfile text
+*.dockerfile text
+docker-compose.yml text
+docker-compose.yaml text
+
+###############################################################################
+# GitHub Actions
+###############################################################################
+.github/** text
+
+###############################################################################
+# Keep generated files as binary
+###############################################################################
+*.jar binary
+*.apk binary
+*.aab binary
+*.ipa binary
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+
+###############################################################################
+# GitHub Linguist
+###############################################################################
+
+# Dependencies
+vendor/** linguist-vendored
+node_modules/** linguist-vendored
+Pods/** linguist-vendored
+
+# Generated
+build/** linguist-generated
+dist/** linguist-generated
+coverage/** linguist-generated
+*.g.dart linguist-generated
+*.freezed.dart linguist-generated
+*.gr.dart linguist-generated
+
+# Flutter
+.flutter-plugins linguist-generated
+.flutter-plugins-dependencies linguist-generated
+
+*.dart linguist-language=Dart
+*.go linguist-language=Go
+*.php linguist-language=PHP
+*.js linguist-language=JavaScript
+*.jsx linguist-language=JavaScript
+*.ts linguist-language=TypeScript
+*.tsx linguist-language=TypeScript
+*.html linguist-language=HTML
+*.css linguist-language=CSS
+*.scss linguist-language=SCSS
+*.sql linguist-language=SQL
