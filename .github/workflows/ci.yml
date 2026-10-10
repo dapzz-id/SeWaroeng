@@ -1,0 +1,119 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  backend:
+    name: Backend (Laravel 13 & PHP 8.4)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: sewaroeng_test
+          POSTGRES_USER: sewaroeng_app
+          POSTGRES_PASSWORD: sewaroeng_password
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, xml, ctype, iconv, intl, pdo_pgsql, pgsql, redis
+          coverage: none
+
+      - name: Validate composer.json
+        working-directory: backend
+        run: composer validate --strict
+
+      - name: Install Composer dependencies
+        working-directory: backend
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Check code formatting (Pint)
+        working-directory: backend
+        run: ./vendor/bin/pint --test
+
+      - name: Configure PostgreSQL Role Privileges
+        run: |
+          sudo apt-get install -y postgresql-client
+          PGPASSWORD=sewaroeng_password psql -h 127.0.0.1 -U sewaroeng_app -d sewaroeng_test -c "ALTER ROLE sewaroeng_app WITH NOSUPERUSER NOBYPASSRLS;"
+
+      - name: Copy .env
+        working-directory: backend
+        run: cp .env.example .env
+
+      - name: Generate App Key
+        working-directory: backend
+        run: php artisan key:generate
+
+      - name: Run Database Migrations
+        working-directory: backend
+        env:
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_DATABASE: sewaroeng_test
+          DB_USERNAME: sewaroeng_app
+          DB_PASSWORD: sewaroeng_password
+        run: php artisan migrate --force
+
+      - name: Run Backend Tests
+        working-directory: backend
+        env:
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_DATABASE: sewaroeng_test
+          DB_USERNAME: sewaroeng_app
+          DB_PASSWORD: sewaroeng_password
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+        run: php artisan test
+
+  frontend:
+    name: Frontend (Flutter & Drift)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: flutter pub get
+
+      - name: Check code formatting
+        working-directory: frontend
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze code
+        working-directory: frontend
+        run: flutter analyze
+
+      - name: Run Flutter tests
+        working-directory: frontend
+        run: flutter test
