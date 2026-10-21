@@ -86,7 +86,7 @@ class MockWhatsAppProvider implements WhatsAppProviderInterface
         };
     }
 
-    public function verifyConnection(array $credentials, ?string $phoneNumberId = null, string $environment = 'sandbox'): array
+    public function verifyConnection(array $credentials, ?string $phoneNumberId = null, string $environment = 'sandbox', ?string $apiVersion = null): array
     {
         $token = $credentials['access_token'] ?? $credentials['api_key'] ?? null;
 
@@ -151,7 +151,32 @@ class MockWhatsAppProvider implements WhatsAppProviderInterface
                 recipientPhone: isset($item['recipient_id']) ? (string) $item['recipient_id'] : null,
                 errorCode: $item['errors'][0]['code'] ?? null,
                 errorMessage: $item['errors'][0]['title'] ?? null,
-                rawPayload: $item
+                rawPayload: $item,
+                isInbound: false,
+                senderPhone: null,
+                messageText: null,
+                callbackData: $item['biz_opaque_callback_data'] ?? ($item['callback_data'] ?? null)
+            );
+        }
+
+        $messages = $request->input('messages', []);
+        foreach ($messages as $msg) {
+            if (! isset($msg['id'], $msg['from'])) {
+                continue;
+            }
+
+            $events[] = new WhatsAppWebhookEvent(
+                providerMessageId: (string) $msg['id'],
+                status: 'inbound_message',
+                timestamp: isset($msg['timestamp']) ? (string) $msg['timestamp'] : null,
+                recipientPhone: null,
+                errorCode: null,
+                errorMessage: null,
+                phoneNumberId: $request->input('phone_number_id'),
+                rawPayload: $msg,
+                isInbound: true,
+                senderPhone: (string) $msg['from'],
+                messageText: $msg['text']['body'] ?? ($msg['body'] ?? null)
             );
         }
 

@@ -20,6 +20,7 @@ use App\Models\Tenant;
 use App\Services\Notification\NotificationService;
 use App\Services\PosService;
 use App\Services\Subscription\SubscriptionEntitlementService;
+use App\Services\WhatsApp\WhatsAppNotificationService;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Crypt;
@@ -344,6 +345,26 @@ class OrderService
                     'created_at' => now(),
                 ]);
 
+                // 11. Async WhatsApp Order Confirmation (Failure-isolated)
+                try {
+                    if ($order->customer_id || ! empty($order->customer_contact_snapshot)) {
+                        $dispatchOrder = function () use ($order) {
+                            try {
+                                app(WhatsAppNotificationService::class)->queueOrderConfirmation($order);
+                            } catch (\Throwable $e) {
+                                Log::warning("WhatsApp order confirmation dispatch failed for order {$order->id}: {$e->getMessage()}");
+                            }
+                        };
+                        if (DB::transactionLevel() > 0 && ! app()->environment('testing')) {
+                            DB::afterCommit($dispatchOrder);
+                        } else {
+                            $dispatchOrder();
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning("WhatsApp order confirmation dispatch failed for order {$order->id}: {$e->getMessage()}");
+                }
+
                 return $order->load(['items.variant.product', 'table', 'session']);
             });
         });
@@ -384,6 +405,26 @@ class OrderService
                     'after' => ['status' => $newStatus],
                     'created_at' => now(),
                 ]);
+
+                // Async WhatsApp Order Status Update (Failure-isolated)
+                try {
+                    if ($order->customer_id || ! empty($order->customer_contact_snapshot)) {
+                        $dispatchStatus = function () use ($order, $newStatus) {
+                            try {
+                                app(WhatsAppNotificationService::class)->queueOrderStatusUpdate($order, $newStatus);
+                            } catch (\Throwable $e) {
+                                Log::warning("WhatsApp order status update dispatch failed for order {$order->id}: {$e->getMessage()}");
+                            }
+                        };
+                        if (DB::transactionLevel() > 0 && ! app()->environment('testing')) {
+                            DB::afterCommit($dispatchStatus);
+                        } else {
+                            $dispatchStatus();
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning("WhatsApp order status update dispatch failed for order {$order->id}: {$e->getMessage()}");
+                }
 
                 return $order;
             });

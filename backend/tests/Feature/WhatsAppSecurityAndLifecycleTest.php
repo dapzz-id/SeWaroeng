@@ -4,11 +4,13 @@ namespace Tests\Feature;
 
 use App\Domain\Tenant\TenantManager;
 use App\Models\Outlet;
+use App\Models\Role;
 use App\Models\Subscription;
 use App\Models\SubscriptionPlan;
 use App\Models\Tenant;
 use App\Models\TenantWhatsAppConnection;
 use App\Models\User;
+use App\Models\UserTenantMembership;
 use App\Models\WhatsAppMessage;
 use App\Services\Subscription\SubscriptionEntitlementService;
 use App\Services\Subscription\SubscriptionService;
@@ -270,5 +272,67 @@ class WhatsAppSecurityAndLifecycleTest extends TenantTestCase
 
         // Blocked with SubscriptionFeatureNotIncludedException / 403 Forbidden
         $this->assertTrue(in_array($response->status(), [402, 403], true));
+    }
+
+    public function test_manager_cannot_modify_sensitive_credentials(): void
+    {
+        $managerData = $this->addMemberToTenant($this->tenantA, 'manager', 'Manager A', [$this->outletA->id]);
+        $manager = $managerData['user'];
+
+        // Manager attempts to update credentials
+        $response = $this->authenticateTenantUser($manager, $this->tenantA)
+            ->putJson('/api/v1/whatsapp/connection', [
+                'provider' => 'mock',
+                'credentials' => [
+                    'access_token' => 'manager_attempted_token',
+                ],
+            ]);
+
+        $response->assertStatus(403);
+        $this->assertStringContainsString('Hanya Owner atau Superadmin', $response->json('message'));
+    }
+
+    public function test_mock_provider_rejected_in_production_environment(): void
+    {
+        // 1. Owner attempt to configure mock in production is rejected
+        $response = $this->authenticateTenantUser($this->ownerA, $this->tenantA)
+            ->putJson('/api/v1/whatsapp/connection', [
+                'provider' => 'mock',
+                'environment' => 'production',
+                'credentials' => [
+                    'access_token' => 'token_prod_attempt',
+                ],
+            ]);
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('Mock WhatsApp Provider tidak dapat digunakan di environment produksi', $response->json('message'));
+
+        // 2. Superadmin attempt to configure mock in production is ALSO strictly rejected
+        $superAdmin = User::create([
+            'name' => 'Platform Superadmin',
+            'email' => 'superadmin.prod.test@sewaroeng.id',
+            'password' => bcrypt('password'),
+            'is_superadmin' => true,
+        ]);
+
+        $ownerRole = Role::where('slug', 'owner')->first();
+        UserTenantMembership::create([
+            'tenant_id' => $this->tenantA->id,
+            'user_id' => $superAdmin->id,
+            'role_id' => $ownerRole->id,
+            'status' => 'active',
+        ]);
+
+        $superResponse = $this->authenticateTenantUser($superAdmin, $this->tenantA)
+            ->putJson('/api/v1/whatsapp/connection', [
+                'provider' => 'mock',
+                'environment' => 'production',
+                'credentials' => [
+                    'access_token' => 'token_super_attempt',
+                ],
+            ]);
+
+        $superResponse->assertStatus(422);
+        $this->assertStringContainsString('Mock WhatsApp Provider tidak dapat digunakan di environment produksi', $superResponse->json('message'));
     }
 }

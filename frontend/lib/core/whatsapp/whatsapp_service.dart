@@ -8,12 +8,14 @@ class WhatsAppService extends ChangeNotifier {
   WhatsAppConnectionModel? _connection;
   List<WhatsAppProviderDefinitionModel> _providers = [];
   List<WhatsAppMessageModel> _messages = [];
+  WhatsAppPreferencesModel? _preferences;
   bool _isLoading = false;
   String? _errorMessage;
 
   WhatsAppConnectionModel? get connection => _connection;
   List<WhatsAppProviderDefinitionModel> get providers => _providers;
   List<WhatsAppMessageModel> get messages => _messages;
+  WhatsAppPreferencesModel? get preferences => _preferences;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
 
@@ -233,6 +235,147 @@ class WhatsAppService extends ChangeNotifier {
       }
     } catch (e) {
       _setError('Error sending receipt to WhatsApp: $e');
+      return false;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  /// Fetch merchant WhatsApp notification preferences.
+  Future<void> fetchPreferences() async {
+    _setLoading(true);
+    _setError(null);
+
+    try {
+      final res = await apiClient.get<dynamic>('/api/v1/whatsapp/preferences');
+      if (res.isSuccess && res.data is Map<String, dynamic>) {
+        _preferences = WhatsAppPreferencesModel.fromJson(res.data as Map<String, dynamic>);
+      } else {
+        _setError(res.message ?? 'Gagal memuat preferensi notifikasi');
+      }
+    } catch (e) {
+      _setError('Error loading WhatsApp preferences: $e');
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  /// Update merchant WhatsApp notification preferences.
+  Future<bool> savePreferences(WhatsAppPreferencesModel prefs) async {
+    _setLoading(true);
+    _setError(null);
+
+    try {
+      final res = await apiClient.post<dynamic>(
+        '/api/v1/whatsapp/preferences',
+        body: prefs.toJson(),
+      );
+
+      if (res.isSuccess) {
+        _preferences = prefs;
+        notifyListeners();
+        return true;
+      } else {
+        _setError(res.message ?? 'Gagal menyimpan preferensi notifikasi');
+        return false;
+      }
+    } catch (e) {
+      _setError('Error saving WhatsApp preferences: $e');
+      return false;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  /// Execute safe natural language business query via WhatsApp engine.
+  Future<WhatsAppBusinessQueryResultModel?> executeBusinessQuery(String queryText) async {
+    _setLoading(true);
+    _setError(null);
+
+    try {
+      final res = await apiClient.post<dynamic>(
+        '/api/v1/whatsapp/query',
+        body: {'query': queryText},
+      );
+
+      if (res.isSuccess && res.data is Map<String, dynamic>) {
+        return WhatsAppBusinessQueryResultModel.fromJson(res.data as Map<String, dynamic>);
+      } else {
+        _setError(res.message ?? 'Gagal mengeksekusi query bisnis');
+        return null;
+      }
+    } catch (e) {
+      _setError('Error executing business query: $e');
+      return null;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  /// Dispatch order confirmation to customer.
+  Future<bool> sendOrderConfirmation(String orderId) async {
+    _setLoading(true);
+    _setError(null);
+
+    try {
+      final res = await apiClient.post<dynamic>('/api/v1/whatsapp/order/$orderId/confirmation');
+      if (res.isSuccess) {
+        await fetchMessages();
+        return true;
+      } else {
+        _setError(res.message ?? 'Gagal mengirim konfirmasi pesanan');
+        return false;
+      }
+    } catch (e) {
+      _setError('Error sending order confirmation: $e');
+      return false;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  /// Dispatch booking confirmation to customer.
+  Future<bool> sendBookingConfirmation(String bookingId) async {
+    _setLoading(true);
+    _setError(null);
+
+    try {
+      final res = await apiClient.post<dynamic>('/api/v1/whatsapp/booking/$bookingId/confirmation');
+      if (res.isSuccess) {
+        await fetchMessages();
+        return true;
+      } else {
+        _setError(res.message ?? 'Gagal mengirim konfirmasi reservasi');
+        return false;
+      }
+    } catch (e) {
+      _setError('Error sending booking confirmation: $e');
+      return false;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  /// Dispatch daily sales summary to merchant owner.
+  Future<bool> sendDailySummary({String? date}) async {
+    _setLoading(true);
+    _setError(null);
+
+    try {
+      final res = await apiClient.post<dynamic>(
+        '/api/v1/whatsapp/daily-summary',
+        body: date != null ? {'date': date} : {},
+      );
+
+      if (res.isSuccess) {
+        await fetchMessages();
+        return true;
+      } else {
+        _setError(res.message ?? 'Gagal memproses ringkasan penjualan harian');
+        return false;
+      }
+    } catch (e) {
+      _setError('Error sending daily summary: $e');
       return false;
     } finally {
       _setLoading(false);

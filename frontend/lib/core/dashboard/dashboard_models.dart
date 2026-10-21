@@ -228,25 +228,33 @@ class DashboardData {
 
   factory DashboardData.fromJson(Map<String, dynamic> json) {
     return DashboardData(
-      period: DashboardPeriod.fromJson((json['period'] as Map<String, dynamic>?) ?? {}),
-      kpi: DashboardKpis.fromJson((json['kpi'] as Map<String, dynamic>?) ?? {}),
+      period: DashboardPeriod.fromJson(
+        json['period'] is Map ? (json['period'] as Map).cast<String, dynamic>() : {},
+      ),
+      kpi: DashboardKpis.fromJson(
+        json['kpi'] is Map ? (json['kpi'] as Map).cast<String, dynamic>() : {},
+      ),
       topProducts: ((json['top_products'] as List<dynamic>?) ?? [])
-          .map((i) => TopProductItem.fromJson(i as Map<String, dynamic>))
+          .map((i) => TopProductItem.fromJson((i as Map).cast<String, dynamic>()))
           .toList(),
       lowStock: ((json['low_stock'] as List<dynamic>?) ?? [])
-          .map((i) => LowStockItem.fromJson(i as Map<String, dynamic>))
+          .map((i) => LowStockItem.fromJson((i as Map).cast<String, dynamic>()))
           .toList(),
       topCustomers: ((json['top_customers'] as List<dynamic>?) ?? [])
-          .map((i) => TopCustomerItem.fromJson(i as Map<String, dynamic>))
+          .map((i) => TopCustomerItem.fromJson((i as Map).cast<String, dynamic>()))
           .toList(),
-      paymentSummary: (json['payment_summary'] as Map<String, dynamic>?) ?? {},
+      paymentSummary: json['payment_summary'] is Map
+          ? (json['payment_summary'] as Map).cast<String, dynamic>()
+          : {},
       outletSummary: ((json['outlet_summary'] as List<dynamic>?) ?? [])
-          .map((i) => OutletSummaryItem.fromJson(i as Map<String, dynamic>))
+          .map((i) => OutletSummaryItem.fromJson((i as Map).cast<String, dynamic>()))
           .toList(),
-      shiftSummary: json['shift_summary'] != null
-          ? ShiftSummaryItem.fromJson(json['shift_summary'] as Map<String, dynamic>)
+      shiftSummary: json['shift_summary'] is Map
+          ? ShiftSummaryItem.fromJson((json['shift_summary'] as Map).cast<String, dynamic>())
           : null,
-      alerts: AlertsSummary.fromJson((json['alerts'] as Map<String, dynamic>?) ?? {}),
+      alerts: AlertsSummary.fromJson(
+        json['alerts'] is Map ? (json['alerts'] as Map).cast<String, dynamic>() : {},
+      ),
     );
   }
 }

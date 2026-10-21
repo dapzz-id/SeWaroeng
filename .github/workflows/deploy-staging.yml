@@ -1,0 +1,97 @@
+name: Manual Staging Deployment
+
+# Gated strictly behind manual operator invocation (workflow_dispatch).
+# Never executes automatically on push or pull request.
+on:
+  workflow_dispatch:
+    inputs:
+      staging_api_host:
+        description: 'Staging backend API hostname (e.g. staging-api.example.com)'
+        required: true
+        type: string
+      staging_web_host:
+        description: 'Staging frontend Web hostname (e.g. staging.example.com)'
+        required: true
+        type: string
+      deployment_mode:
+        description: 'Deployment execution mode'
+        required: true
+        default: 'dry-run'
+        type: choice
+        options:
+          - 'dry-run'
+          - 'apply'
+      skip_frontend_build:
+        description: 'Skip frontend compilation (use existing artifact)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  deploy-staging:
+    name: Staging Deployment Execution
+    runs-on: ubuntu-latest
+    # Protected GitHub Environment requiring authorized maintainer approval
+    environment: staging
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify Environment Secrets Configuration
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_SSH_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_SSH_USER }}
+          STAGING_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          STAGING_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$STAGING_HOST" ] || [ -z "$STAGING_USER" ] || [ -z "$STAGING_KEY" ] || [ -z "$STAGING_KNOWN_HOSTS" ]; then
+            echo "::error::Staging deployment secrets (STAGING_SSH_HOST, STAGING_SSH_USER, STAGING_SSH_KEY, STAGING_SSH_KNOWN_HOSTS) are not configured in the 'staging' GitHub Environment."
+            echo "Remote staging deployment remains blocked until a target VPS is provisioned and secrets are registered by the repository owner."
+            exit 1
+          fi
+
+      - name: Validate Staging Domain Input Parameters
+        env:
+          API_HOST: ${{ github.event.inputs.staging_api_host }}
+          WEB_HOST: ${{ github.event.inputs.staging_web_host }}
+        run: |
+          bash deploy/validate-domains.sh --mode staging --api-host "$API_HOST" --web-host "$WEB_HOST"
+
+      - name: Validate Local Shell Scripts Syntax
+        run: |
+          bash -n deploy/preflight.sh
+          bash -n deploy/deploy-staging.sh
+          bash -n deploy/validate-domains.sh
+          bash -n deploy/render-nginx-config.sh
+
+      - name: Setup SSH Client & Known Hosts
+        env:
+          SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/staging_id_ed25519
+          chmod 600 ~/.ssh/staging_id_ed25519
+          echo "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Execute Deployment on Target Host
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_SSH_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_SSH_USER }}
+          API_HOST: ${{ github.event.inputs.staging_api_host }}
+          WEB_HOST: ${{ github.event.inputs.staging_web_host }}
+          MODE: ${{ github.event.inputs.deployment_mode }}
+          SKIP_FRONTEND: ${{ github.event.inputs.skip_frontend_build }}
+        run: |
+          FLAGS="--${MODE} --api-host '${API_HOST}' --web-host '${WEB_HOST}'"
+          if [ "$SKIP_FRONTEND" = "true" ]; then
+            FLAGS="$FLAGS --skip-frontend-build"
+          fi
+
+          echo "Connecting to ${STAGING_USER}@${STAGING_HOST} with strict host key verification..."
+          echo "Executing staging pipeline in mode: --${MODE} (Target API: ${API_HOST}, Target Web: ${WEB_HOST})"
+          ssh -i ~/.ssh/staging_id_ed25519 -o StrictHostKeyChecking=yes -o BatchMode=yes "${STAGING_USER}@${STAGING_HOST}" \
+            "cd /var/www/sewaroeng && git pull origin main && bash deploy/deploy-staging.sh ${FLAGS}"

@@ -142,6 +142,22 @@ class PurchaseOrderController extends Controller
         );
     }
 
+    public function smartReorder(Request $request): JsonResponse
+    {
+        $tenantId = app(TenantContext::class)->id();
+        $locationId = $request->query('location_id');
+
+        $recommendations = $this->purchasingService->calculateSmartReorder(
+            tenantId: $tenantId,
+            locationId: $locationId
+        );
+
+        return ApiResponse::success(
+            data: $recommendations,
+            message: 'Smart reorder recommendations calculated successfully.'
+        );
+    }
+
     protected function formatOrder(PurchaseOrder $po): array
     {
         return [

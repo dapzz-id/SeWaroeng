@@ -94,12 +94,35 @@ class ApiClient {
     );
   }
 
+  /// Safely resolves and normalizes request paths against baseUrl.
+  /// Prevents duplicate `/api/v1` prefixes and trims redundant slashes.
+  Uri buildUri(String path) {
+    var base = baseUrl.trim();
+    while (base.endsWith('/')) {
+      base = base.substring(0, base.length - 1);
+    }
+
+    var cleanPath = path.trim();
+    if (!cleanPath.startsWith('/')) {
+      cleanPath = '/$cleanPath';
+    }
+
+    // Deduplicate /api/v1 if both baseUrl and cleanPath contain it
+    if (base.endsWith('/api/v1') && cleanPath.startsWith('/api/v1/')) {
+      cleanPath = cleanPath.substring('/api/v1'.length);
+    } else if (base.endsWith('/api/v1') && cleanPath == '/api/v1') {
+      cleanPath = '';
+    }
+
+    return Uri.parse('$base$cleanPath');
+  }
+
   Future<ApiResponse<T>> get<T>(
     String path, {
     Map<String, String>? headers,
   }) async {
     final token = await tokenProvider?.call();
-    final uri = Uri.parse('$baseUrl$path');
+    final uri = buildUri(path);
     final combinedHeaders = _buildHeaders(token: token, customHeaders: headers);
 
     final response = await _httpClient.get(uri, headers: combinedHeaders);
@@ -112,7 +135,7 @@ class ApiClient {
     Map<String, String>? headers,
   }) async {
     final token = await tokenProvider?.call();
-    final uri = Uri.parse('$baseUrl$path');
+    final uri = buildUri(path);
     final combinedHeaders = _buildHeaders(token: token, customHeaders: headers);
 
     return await _httpClient.get(uri, headers: combinedHeaders);
@@ -125,7 +148,7 @@ class ApiClient {
     Map<String, String>? headers,
   }) async {
     final token = await tokenProvider?.call();
-    final uri = Uri.parse('$baseUrl$path');
+    final uri = buildUri(path);
     final combinedHeaders = _buildHeaders(
       token: token,
       idempotencyKey: idempotencyKey,
@@ -150,7 +173,7 @@ class ApiClient {
     Map<String, String>? headers,
   }) async {
     final token = await tokenProvider?.call();
-    final uri = Uri.parse('$baseUrl$path');
+    final uri = buildUri(path);
     final combinedHeaders = _buildHeaders(
       token: token,
       idempotencyKey: idempotencyKey,
@@ -175,7 +198,7 @@ class ApiClient {
     Map<String, String>? headers,
   }) async {
     final token = await tokenProvider?.call();
-    final uri = Uri.parse('$baseUrl$path');
+    final uri = buildUri(path);
     final combinedHeaders = _buildHeaders(
       token: token,
       idempotencyKey: idempotencyKey,
@@ -198,7 +221,7 @@ class ApiClient {
     Map<String, String>? headers,
   }) async {
     final token = await tokenProvider?.call();
-    final uri = Uri.parse('$baseUrl$path');
+    final uri = buildUri(path);
     final combinedHeaders = _buildHeaders(token: token, customHeaders: headers);
 
     final response = await _httpClient.delete(uri, headers: combinedHeaders);

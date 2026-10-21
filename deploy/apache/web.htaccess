@@ -1,0 +1,41 @@
+# ==============================================================================
+# SeWaroeng — Flutter Web Apache .htaccess for Client-Side SPA Routing
+# Deploy into the root of the compiled Flutter Web directory (e.g. public_html/ or web/)
+# ==============================================================================
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # 1. Enforce HTTPS
+    RewriteCond %{HTTPS} off
+    RewriteCond %{REQUEST_URI} !^/\.well-known/acme-challenge/
+    RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+    # 2. Prevent directory browsing
+    Options -Indexes -MultiViews
+
+    # 3. Cache-Control: NEVER cache entrypoints, service workers, or version metadata
+    <IfModule mod_headers.c>
+        <FilesMatch "(index\.html|flutter_service_worker\.js|flutter_bootstrap\.js|version\.json|manifest\.json)$">
+            Header set Cache-Control "no-cache, no-store, must-revalidate"
+            Header set Pragma "no-cache"
+            Header set Expires 0
+        </FilesMatch>
+
+        # 4. Cache-Control: Cache static hashed bundles, wasm, and fonts immutably
+        <FilesMatch "\.(css|js|woff2?|ttf|eot|wasm|png|jpe?g|gif|ico|svg|webp)$">
+            Header set Cache-Control "public, max-age=31536000, immutable"
+        </FilesMatch>
+
+        # 5. Security Headers
+        Header set X-Content-Type-Options "nosniff"
+        Header set X-Frame-Options "SAMEORIGIN"
+        Header set Referrer-Policy "strict-origin-when-cross-origin"
+    </IfModule>
+
+    # 6. SPA Routing: Fall back unmatched paths to index.html
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule . /index.html [L]
+</IfModule>

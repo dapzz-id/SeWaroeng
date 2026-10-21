@@ -1,17 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:frontend/core/finance/finance_models.dart';
 import 'package:frontend/core/finance/finance_service.dart';
+import 'package:frontend/core/payment/payment_reconciliation_service.dart';
 import 'package:frontend/presentation/finance/expense_detail_sheet.dart';
 import 'package:frontend/presentation/finance/expense_form_dialog.dart';
+import 'package:frontend/presentation/finance/payment_reconciliation_screen.dart';
 
 class FinanceOverviewScreen extends StatefulWidget {
   final FinanceService financeService;
+  final PaymentReconciliationService? reconciliationService;
   final String userRole; // 'owner', 'manager', 'accountant', 'cashier'
   final String? outletId;
 
   const FinanceOverviewScreen({
     super.key,
     required this.financeService,
+    this.reconciliationService,
     this.userRole = 'owner',
     this.outletId,
   });
@@ -150,6 +154,24 @@ class _FinanceOverviewScreenState extends State<FinanceOverviewScreen> with Sing
       appBar: AppBar(
         title: const Text('Keuangan & Laba Rugi'),
         actions: [
+          IconButton(
+            key: const Key('open_reconciliation_button'),
+            icon: const Icon(Icons.compare_arrows, color: Color(0xFF10B981)),
+            tooltip: 'Rekonsiliasi Pembayaran Digital',
+            onPressed: () {
+              final recService = widget.reconciliationService ??
+                  PaymentReconciliationService(
+                    apiClient: widget.financeService.apiClient,
+                  );
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => PaymentReconciliationScreen(
+                    reconciliationService: recService,
+                  ),
+                ),
+              );
+            },
+          ),
           PopupMenuButton<String>(
             key: const Key('export_report_button'),
             icon: const Icon(Icons.file_download_outlined),

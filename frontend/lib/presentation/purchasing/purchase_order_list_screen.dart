@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/inventory/inventory_service.dart';
+import '../../core/purchasing/purchasing_models.dart';
 import '../../core/purchasing/purchasing_service.dart';
 import 'purchase_order_create_screen.dart';
 import 'purchase_order_detail_screen.dart';
@@ -114,6 +115,12 @@ class _PurchaseOrderListScreenState extends State<PurchaseOrderListScreen> {
                 ),
               );
             },
+          ),
+          IconButton(
+            key: const Key('smart_reorder_recommendations_action'),
+            icon: const Icon(Icons.tips_and_updates, color: Color(0xFFFBBF24)),
+            tooltip: 'Rekomendasi Smart Reorder',
+            onPressed: _showSmartReorderDialog,
           ),
           IconButton(
             key: const Key('refresh_po_button'),
@@ -326,6 +333,160 @@ class _PurchaseOrderListScreenState extends State<PurchaseOrderListScreen> {
           setState(() => _selectedStatus = status);
           _loadOrders();
         }
+      },
+    );
+  }
+
+  Future<void> _showSmartReorderDialog() async {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1E293B),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (modalCtx) {
+        return FutureBuilder<List<SmartReorderRecommendationModel>>(
+          future: widget.purchasingService.fetchSmartReorderRecommendations(),
+          builder: (ctx, snapshot) {
+            return SafeArea(
+              child: Container(
+                padding: const EdgeInsets.all(20),
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.8,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.tips_and_updates, color: Color(0xFFFBBF24)),
+                            SizedBox(width: 8),
+                            Text(
+                              'Smart Reorder (PRD #13)',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white70),
+                          onPressed: () => Navigator.pop(modalCtx),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Formula: (Rata-rata Harian × Lead Time 3 Hari) + Ambang Batas - Stok Tersedia',
+                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                    ),
+                    const Divider(color: Color(0xFF334155), height: 24),
+                    if (snapshot.connectionState == ConnectionState.waiting)
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(32.0),
+                          child: CircularProgressIndicator(),
+                        ),
+                      )
+                    else if (snapshot.hasError)
+                      Center(
+                        child: Text(
+                          'Gagal memuat rekomendasi: ${snapshot.error}',
+                          style: const TextStyle(color: Colors.red),
+                        ),
+                      )
+                    else if (!snapshot.hasData || snapshot.data!.isEmpty)
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(vertical: 32.0),
+                          child: Column(
+                            children: [
+                              Icon(Icons.check_circle_outline, color: Color(0xFF34D399), size: 48),
+                              SizedBox(height: 12),
+                              Text(
+                                'Semua stok dalam ambang batas aman',
+                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'Tidak ada item yang membutuhkan pemesanan ulang saat ini.',
+                                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      Expanded(
+                        child: ListView.separated(
+                          itemCount: snapshot.data!.length,
+                          separatorBuilder: (_, _) => const Divider(color: Color(0xFF334155)),
+                          itemBuilder: (itemCtx, idx) {
+                            final item = snapshot.data![idx];
+                            return ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: Text(
+                                item.name,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'SKU: ${item.sku} • Lokasi: ${item.locationName}',
+                                    style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Tersedia: ${item.currentAvailable} ${item.baseUnit} | Aman: ${item.safetyStock}',
+                                    style: const TextStyle(color: Color(0xFFCBD5E1), fontSize: 12),
+                                  ),
+                                  if (item.supplierName != null)
+                                    Text(
+                                      'Supplier: ${item.supplierName}',
+                                      style: const TextStyle(color: Color(0xFF38BDF8), fontSize: 12),
+                                    ),
+                                ],
+                              ),
+                              trailing: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    'Order: ${item.recommendedOrderQuantity} ${item.baseUnit}',
+                                    style: const TextStyle(
+                                      color: Color(0xFFFBBF24),
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                  if (item.estimatedTotalCostMinor > 0)
+                                    Text(
+                                      'Rp ${item.estimatedTotalCostMinor ~/ 100}',
+                                      style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                                    ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
       },
     );
   }

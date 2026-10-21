@@ -1,0 +1,13 @@
+[Unit]
+Description=SeWaroeng 1-Minute Scheduler Timer
+Documentation=https://github.com/dapzz-id/SeWaroeng
+
+[Timer]
+# Run every minute on the minute (:00)
+OnCalendar=*-*-* *:*:00
+Persistent=true
+AccuracySec=1s
+Unit=sewaroeng-scheduler.service
+
+[Install]
+WantedBy=timers.target

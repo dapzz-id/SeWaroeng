@@ -387,7 +387,7 @@ class DashboardService
             'top_products' => $topProducts,
             'low_stock' => $lowStockItems,
             'top_customers' => $topCustomers,
-            'payment_summary' => $paymentStatuses,
+            'payment_summary' => (object) $paymentStatuses,
             'outlet_summary' => $outletOverview,
             'shift_summary' => $shiftSummary,
             'alerts' => [

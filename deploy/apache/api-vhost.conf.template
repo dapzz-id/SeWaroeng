@@ -1,0 +1,69 @@
+# ==============================================================================
+# SeWaroeng — Apache 2.4 VirtualHost Configuration Template for Backend API
+# Target: Ubuntu/Debian or RHEL/Rocky Linux VPS running Apache 2.4 + PHP 8.4-FPM
+# Variables: ${API_HOST}, ${APP_ROOT}, ${PHP_FPM_SOCKET}
+# ==============================================================================
+
+<VirtualHost *:80>
+    ServerName ${API_HOST}
+    DocumentRoot ${APP_ROOT}/backend/public
+
+    # Force HTTPS redirect outside local development
+    RewriteEngine On
+    RewriteCond %{HTTPS} off
+    RewriteCond %{REQUEST_URI} !^/\.well-known/acme-challenge/
+    RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+    # ACME challenge pass-through
+    <Directory "${APP_ROOT}/backend/public/.well-known/acme-challenge">
+        AllowOverride None
+        Require all granted
+    </Directory>
+</VirtualHost>
+
+<VirtualHost *:443>
+    ServerName ${API_HOST}
+    DocumentRoot ${APP_ROOT}/backend/public
+
+    SSLEngine on
+    SSLCertificateFile /etc/letsencrypt/live/${API_HOST}/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/${API_HOST}/privkey.pem
+
+    # Security Headers
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+
+    # Forward Authorization header to PHP
+    SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+
+    <Directory "${APP_ROOT}/backend/public">
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+
+        # Deny direct access to hidden files
+        <FilesMatch "^\.">
+            Require all denied
+        </FilesMatch>
+    </Directory>
+
+    # PHP 8.4-FPM Proxy via Unix Socket
+    <FilesMatch \.php$>
+        SetHandler "proxy:unix:${PHP_FPM_SOCKET}|fcgi://localhost/"
+    </FilesMatch>
+
+    # Health & Liveness fast probes
+    <Location "/up">
+        Require all granted
+    </Location>
+
+    <Location "/api/v1/health">
+        Require all granted
+    </Location>
+
+    ErrorLog ${APACHE_LOG_DIR}/${API_HOST}_error.log
+    CustomLog ${APACHE_LOG_DIR}/${API_HOST}_access.log combined
+</VirtualHost>

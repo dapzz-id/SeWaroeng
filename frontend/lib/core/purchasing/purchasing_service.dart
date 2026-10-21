@@ -510,4 +510,45 @@ class PurchasingService extends ChangeNotifier {
       _setLoading(false);
     }
   }
+
+  /// Fetch Smart Reorder recommendations based on consumption velocity and lead time (PRD #13).
+  Future<List<SmartReorderRecommendationModel>>
+  fetchSmartReorderRecommendations({String? locationId}) async {
+    _setLoading(true);
+    _setError(null);
+
+    try {
+      final path = _buildPath('/api/v1/purchasing/smart-reorder', {
+        'location_id': locationId,
+      });
+
+      final response = await apiClient.get<dynamic>(path);
+
+      if (response.isSuccess && response.data != null) {
+        final list =
+            response.data is List
+                ? response.data as List
+                : (response.data is Map &&
+                    (response.data as Map).containsKey('data'))
+                ? (response.data as Map)['data'] as List
+                : <dynamic>[];
+
+        return list
+            .map(
+              (item) => SmartReorderRecommendationModel.fromJson(
+                item as Map<String, dynamic>,
+              ),
+            )
+            .toList();
+      } else {
+        _setError(response.message ?? 'Gagal memuat rekomendasi smart reorder');
+        return [];
+      }
+    } catch (e) {
+      _setError('Terjadi kesalahan: $e');
+      return [];
+    } finally {
+      _setLoading(false);
+    }
+  }
 }

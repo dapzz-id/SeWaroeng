@@ -117,3 +117,55 @@ jobs:
       - name: Run Flutter tests
         working-directory: frontend
         run: flutter test
+
+      - name: Verify Flutter Web Staging Build
+        working-directory: frontend
+        run: flutter build web --release --dart-define=APP_ENV=staging --dart-define=API_BASE_URL=https://staging-api.example.internal/api/v1
+
+  hygiene-and-deployment-readiness:
+    name: Repository Hygiene & Deployment Toolkit Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check for accidentally tracked environment files or private keys
+        run: |
+          TRACKED_ENV=$(git ls-files | grep -iE '\.env$' | grep -v '\.env\.example$' || true)
+          if [ -n "$TRACKED_ENV" ]; then
+            echo "::error::Accidentally tracked environment file detected: $TRACKED_ENV"
+            exit 1
+          fi
+
+          TRACKED_SECRETS=$(git ls-files | grep -iE '\.(key|pem|p12|dump)$' || true)
+          if [ -n "$TRACKED_SECRETS" ]; then
+            echo "::error::Accidentally tracked private key or dump detected: $TRACKED_SECRETS"
+            exit 1
+          fi
+
+      - name: Validate Deployment Shell Scripts Syntax (bash -n)
+        run: |
+          bash -n deploy/preflight.sh
+          bash -n deploy/deploy-staging.sh
+          bash -n deploy/validate-domains.sh
+          bash -n deploy/render-nginx-config.sh
+
+      - name: Verify Deployment Artifacts Exist and Are Non-Empty
+        run: |
+          test -s deploy/systemd/sewaroeng-worker.service
+          test -s deploy/systemd/sewaroeng-scheduler.service
+          test -s deploy/systemd/sewaroeng-scheduler.timer
+          test -s deploy/nginx/templates/api.conf.template
+          test -s deploy/nginx/templates/web.conf.template
+          test -s deploy/nginx/production/api.sewaroeng.neuracakrawira.asia.conf
+          test -s deploy/nginx/production/sewaroeng.neuracakrawira.asia.conf
+          test -s scripts/setup-db-staging.sql
+          test -s scripts/setup-db-dev.sql
+          test -s scripts/setup-db-production.sql
+
+      - name: Validate Domain Configuration Logic and Nginx Template Rendering
+        run: |
+          bash deploy/validate-domains.sh --mode staging --api-host staging-api.example.internal --web-host staging.example.internal --flutter-api-url https://staging-api.example.internal/api/v1
+          bash deploy/validate-domains.sh --mode production --api-host api.sewaroeng.neuracakrawira.asia --web-host sewaroeng.neuracakrawira.asia --flutter-api-url https://api.sewaroeng.neuracakrawira.asia/api/v1
+          bash deploy/render-nginx-config.sh --dry-run --api-host staging-api.example.internal --web-host staging.example.internal

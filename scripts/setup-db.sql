@@ -1,22 +1,17 @@
--- PostgreSQL Setup Script for SeWaroeng
--- Creates non-superuser application role without superuser or bypassrls privileges.
+-- ==============================================================================
+-- DEPRECATED: Monolithic setup-db.sql has been decommissioned for safety.
+-- ==============================================================================
+-- To prevent accidental cross-environment resource creation and database modification,
+-- database provisioning has been strictly isolated by environment:
+--
+-- For Staging:             scripts/setup-db-staging.sql
+-- For Local Dev & Test:    scripts/setup-db-dev.sql
+-- For Production:          scripts/setup-db-production.sql (INACTIVE)
+--
+-- Executing this monolithic script is intentionally blocked.
+-- ==============================================================================
 
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'sewaroeng_app') THEN
-        CREATE ROLE sewaroeng_app WITH LOGIN PASSWORD 'sewaroeng_password' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
-    ELSE
-        ALTER ROLE sewaroeng_app WITH NOSUPERUSER NOBYPASSRLS;
-    END IF;
+    RAISE EXCEPTION 'SAFETY HALT: scripts/setup-db.sql is deprecated. Use scripts/setup-db-staging.sql for staging, or scripts/setup-db-dev.sql for local development.';
 END $$;
-
-GRANT ALL PRIVILEGES ON DATABASE sewaroeng TO sewaroeng_app;
-GRANT ALL PRIVILEGES ON DATABASE sewaroeng_test TO sewaroeng_app;
-ALTER SCHEMA public OWNER TO sewaroeng_app;
-GRANT ALL ON SCHEMA public TO sewaroeng_app;
-
-\c sewaroeng
-CREATE EXTENSION IF NOT EXISTS btree_gist;
-
-\c sewaroeng_test
-CREATE EXTENSION IF NOT EXISTS btree_gist;

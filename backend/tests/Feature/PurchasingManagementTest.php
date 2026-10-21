@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Domain\Tenant\TenantManager;
 use App\Models\InventoryItem;
+use App\Models\InventoryItemLocation;
 use App\Models\InventoryLocation;
 use App\Models\InventoryMovement;
 use App\Models\Outlet;
@@ -589,5 +590,80 @@ class PurchasingManagementTest extends TestCase
             'name' => 'Supplier Ilegal',
         ]);
         $res->assertStatus(403);
+    }
+
+    public function test_smart_reorder_calculates_recommendations_based_on_consumption_and_threshold(): void
+    {
+        $invService = app(InventoryService::class);
+
+        [$location, $item] = app(TenantManager::class)->runForTenant($this->tenantA->id, function () use ($invService) {
+            $loc = InventoryLocation::create([
+                'tenant_id' => $this->tenantA->id,
+                'name' => 'Gudang Smart Reorder',
+                'code' => 'GSR-01',
+                'type' => 'warehouse',
+            ]);
+
+            $itm = InventoryItem::create([
+                'tenant_id' => $this->tenantA->id,
+                'sku' => 'SKU-SMART-RO-1',
+                'name' => 'Biji Kopi Arabica Premium',
+                'item_type' => 'raw_material',
+                'production_mode' => 'stocked',
+                'base_unit' => 'kg',
+                'status' => 'active',
+            ]);
+
+            // Opening balance 2 kg, reorder level / safety stock 10 kg
+            $invService->setOpeningBalance(
+                $this->tenantA->id,
+                $itm->id,
+                $loc->id,
+                '2.0000',
+                unitCostMinor: 10000000
+            );
+
+            InventoryItemLocation::where('tenant_id', $this->tenantA->id)
+                ->where('inventory_item_id', $itm->id)
+                ->where('location_id', $loc->id)
+                ->update(['reorder_level' => '10.0000']);
+
+            // Record historical consumption over last 30 days: 60 kg total -> 2 kg/day
+            InventoryMovement::create([
+                'tenant_id' => $this->tenantA->id,
+                'movement_number' => 'INV-TEST-001',
+                'inventory_item_id' => $itm->id,
+                'location_id' => $loc->id,
+                'movement_type' => 'sale',
+                'quantity_delta' => '-60.0000',
+                'unit' => 'kg',
+                'before_on_hand' => '62.0000',
+                'after_on_hand' => '2.0000',
+                'occurred_at' => now()->subDays(5),
+            ]);
+
+            return [$loc, $itm];
+        });
+
+        $res = $this->withHeaders([
+            'Authorization' => "Bearer {$this->tokenA}",
+            'X-Tenant-ID' => $this->tenantA->id,
+        ])->getJson('/api/v1/purchasing/smart-reorder');
+
+        $res->assertStatus(200);
+        $res->assertJsonPath('message', 'Smart reorder recommendations calculated successfully.');
+
+        $data = $res->json('data');
+        $this->assertNotEmpty($data);
+
+        $roItem = collect($data)->firstWhere('inventory_item_id', $item->id);
+        $this->assertNotNull($roItem);
+        $this->assertEquals('Biji Kopi Arabica Premium', $roItem['name']);
+        $this->assertEquals('2.0000', $roItem['current_available']);
+        $this->assertEquals('10.0000', $roItem['safety_stock']);
+        $this->assertEquals('2.0000', $roItem['average_daily_usage']);
+        $this->assertEquals(3, $roItem['lead_time_days']);
+        // Formula: (2.0 * 3) + 10.0 - 2.0 = 14.0000
+        $this->assertEquals('14.0000', $roItem['recommended_order_quantity']);
     }
 }

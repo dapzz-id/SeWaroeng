@@ -65,6 +65,16 @@ class WhatsAppConnectionController extends Controller
         // 1. Enforce Subscription Entitlement
         $this->entitlementService->assertCan($tenant, 'whatsapp');
 
+        // 1b. Role Guard: Manager cannot mutate sensitive provider credentials; Owner or Superadmin required
+        $tenantContext = app(TenantContext::class);
+        $user = $request->user();
+        if (! $tenantContext->isOwner() && ! ($user && $user->isSuperadmin())) {
+            return ApiResponse::error(
+                message: 'Hanya Owner atau Superadmin yang dapat mengubah kredensial koneksi WhatsApp.',
+                status: Response::HTTP_FORBIDDEN
+            );
+        }
+
         // 2. Validate Request
         $validated = $request->validate([
             'provider' => ['required', 'string', 'in:mock,meta_cloud'],
@@ -75,11 +85,19 @@ class WhatsAppConnectionController extends Controller
             'business_account_id' => ['nullable', 'string', 'max:100'],
             'credentials' => ['required', 'array'],
             'configuration' => ['nullable', 'array'],
-            'configuration.api_version' => ['nullable', 'string', 'in:v20.0,v21.0,v22.0'],
+            'configuration.api_version' => ['nullable', 'string', 'in:v21.0,v22.0,v25.0'],
         ]);
 
         $providerKey = strtolower(trim($validated['provider']));
         $environment = $validated['environment'] ?? 'sandbox';
+
+        // 2b. Production Mock Provider Isolation: Mock provider cannot be selected for production
+        if ($providerKey === 'mock' && ($environment === 'production' || app()->environment('production'))) {
+            return ApiResponse::error(
+                message: 'Mock WhatsApp Provider tidak dapat digunakan di environment produksi.',
+                status: Response::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
 
         /** @var TenantWhatsAppConnection|null $connection */
         $connection = TenantWhatsAppConnection::query()
@@ -194,7 +212,8 @@ class WhatsAppConnectionController extends Controller
         $result = $provider->verifyConnection(
             credentials: $connection->encrypted_credentials ?? [],
             phoneNumberId: $connection->phone_number_id,
-            environment: $connection->environment
+            environment: $connection->environment,
+            apiVersion: $connection->configuration['api_version'] ?? null
         );
 
         if ($result['verified']) {
@@ -287,6 +306,84 @@ class WhatsAppConnectionController extends Controller
             message: $dispatched->error_message ?? 'Gagal mengirim pesan uji coba WhatsApp.',
             data: $dispatched,
             status: Response::HTTP_UNPROCESSABLE_ENTITY
+        );
+    }
+
+    /**
+     * Get merchant WhatsApp notification preferences.
+     */
+    public function getPreferences(): JsonResponse
+    {
+        $tenant = app(TenantContext::class)->tenant();
+        $this->entitlementService->assertCan($tenant, 'whatsapp');
+
+        $settings = $tenant->settings ?? [];
+        $notifications = $settings['whatsapp_notifications'] ?? [];
+
+        return ApiResponse::success(data: [
+            'merchant_phone' => $notifications['merchant_phone'] ?? $tenant->phone ?? $tenant->owner?->phone_number,
+            'consent_given' => (bool) ($notifications['consent_given'] ?? false),
+            'daily_sales_summary' => (bool) ($notifications['daily_sales_summary'] ?? false),
+            'low_stock' => (bool) ($notifications['low_stock'] ?? false),
+            'booking_reminder' => (bool) ($notifications['booking_reminder'] ?? false),
+            'payment_settlement' => (bool) ($notifications['payment_settlement'] ?? false),
+            'anomaly_alert' => (bool) ($notifications['anomaly_alert'] ?? false),
+            'provenance' => $settings['whatsapp_notifications_provenance'] ?? null,
+        ]);
+    }
+
+    /**
+     * Update merchant WhatsApp notification preferences.
+     * Enforces affirmative positive consent recording with full provenance.
+     */
+    public function updatePreferences(Request $request): JsonResponse
+    {
+        $tenant = app(TenantContext::class)->tenant();
+        $this->entitlementService->assertCan($tenant, 'whatsapp');
+
+        $validated = $request->validate([
+            'merchant_phone' => ['nullable', 'string', 'max:50'],
+            'consent_given' => ['nullable', 'boolean'],
+            'daily_sales_summary' => ['nullable', 'boolean'],
+            'low_stock' => ['nullable', 'boolean'],
+            'booking_reminder' => ['nullable', 'boolean'],
+            'payment_settlement' => ['nullable', 'boolean'],
+            'anomaly_alert' => ['nullable', 'boolean'],
+        ]);
+
+        $settings = $tenant->settings ?? [];
+        $current = $settings['whatsapp_notifications'] ?? [];
+
+        // If consent_given is explicitly provided, use it; otherwise preserve current or default to true if configuring preferences
+        $consentGiven = $validated['consent_given'] ?? ($current['consent_given'] ?? true);
+
+        $updated = array_merge($current, array_filter($validated, fn ($val) => $val !== null));
+        $updated['consent_given'] = (bool) $consentGiven;
+
+        $provenance = [
+            'consent_status' => $updated['consent_given'] ? 'consented' : 'revoked',
+            'consented_at' => now()->toIso8601String(),
+            'updated_by_user_id' => $request->user()?->id,
+            'source' => 'merchant_portal_settings',
+            'ip_address' => $request->ip(),
+            'categories' => [
+                'daily_sales_summary' => (bool) ($updated['daily_sales_summary'] ?? false),
+                'low_stock' => (bool) ($updated['low_stock'] ?? false),
+                'booking_reminder' => (bool) ($updated['booking_reminder'] ?? false),
+                'payment_settlement' => (bool) ($updated['payment_settlement'] ?? false),
+                'anomaly_alert' => (bool) ($updated['anomaly_alert'] ?? false),
+            ],
+        ];
+
+        $settings['whatsapp_notifications'] = $updated;
+        $settings['whatsapp_notifications_provenance'] = $provenance;
+
+        $tenant->settings = $settings;
+        $tenant->save();
+
+        return ApiResponse::success(
+            data: array_merge($updated, ['provenance' => $provenance]),
+            message: 'Preferensi notifikasi WhatsApp berhasil diperbarui.'
         );
     }
 }

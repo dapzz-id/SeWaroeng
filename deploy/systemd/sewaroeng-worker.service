@@ -1,0 +1,39 @@
+[Unit]
+Description=SeWaroeng Background Queue Worker (Redis)
+After=network.target redis-server.service postgresql.service
+Wants=redis-server.service postgresql.service
+Documentation=https://github.com/dapzz-id/SeWaroeng
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/sewaroeng/backend
+
+# Canonical worker command verified in Sprint 7 (prioritizes default, then notifications & webhooks)
+ExecStart=/usr/bin/php /var/www/sewaroeng/backend/artisan queue:work redis --queue=default,notifications,webhooks --sleep=3 --tries=3 --backoff=5,15,45 --timeout=60
+
+# Bounded restart policy (restarts after 5 seconds on unexpected termination)
+Restart=always
+RestartSec=5
+
+# Graceful shutdown: provides 70s for in-flight job (timeout=60) before SIGKILL
+TimeoutStopSec=70
+KillMode=mixed
+KillSignal=SIGTERM
+
+# Process security hardening
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+# Logging to systemd journal
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sewaroeng-worker
+
+[Install]
+WantedBy=multi-user.target

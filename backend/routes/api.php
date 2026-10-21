@@ -1,11 +1,13 @@
 <?php
 
 use App\Domain\Tenant\TenantContext;
+use App\Http\Controllers\Api\V1\AiCopilotController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BookingController;
 use App\Http\Controllers\Api\V1\CategoryController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\DashboardController;
+use App\Http\Controllers\Api\V1\EmployeeController;
 use App\Http\Controllers\Api\V1\ExpenseController;
 use App\Http\Controllers\Api\V1\FinanceExportController;
 use App\Http\Controllers\Api\V1\FinanceReportController;
@@ -57,23 +59,31 @@ use Illuminate\Support\Facades\Route;
 |--------------------------------------------------------------------------
 */
 
-// Public Health Check (Safe operational status only)
+// Public Health & Readiness Probe (Safe operational status only - zero secrets or traces leaked)
 Route::get('/health', function () {
     $dbHealthy = false;
-    $redisHealthy = false;
+    $redisHealthy = true;
 
     try {
         DB::connection()->getPdo();
         $dbHealthy = true;
     } catch (Throwable $e) {
-        // Safe failure
+        // Safe failure: no connection strings, credentials, or exception traces are leaked
     }
 
-    try {
-        Redis::connection()->ping();
-        $redisHealthy = true;
-    } catch (Throwable $e) {
-        // Safe failure
+    $redisConfigured = in_array('redis', [
+        config('cache.default'),
+        config('session.driver'),
+        config('queue.default'),
+    ], true);
+
+    if ($redisConfigured) {
+        try {
+            Redis::connection()->ping();
+            $redisHealthy = true;
+        } catch (Throwable $e) {
+            $redisHealthy = false;
+        }
     }
 
     $isHealthy = $dbHealthy && $redisHealthy;
@@ -146,6 +156,16 @@ Route::middleware(['auth:sanctum', 'active', 'tenant'])->prefix('outlets')->grou
     Route::get('/{outletId}', [OutletController::class, 'show'])->middleware('outlet:outletId');
     Route::post('/', [OutletController::class, 'store'])->middleware('idempotent');
     Route::patch('/{outletId}', [OutletController::class, 'update'])->middleware(['outlet:outletId', 'idempotent']);
+});
+
+// Employee & Staff Management Routes (Phase 1A.3 / PRD #16)
+Route::middleware(['auth:sanctum', 'active', 'tenant'])->prefix('employees')->group(function () {
+    Route::get('/roles', [EmployeeController::class, 'roles'])->middleware('permission:employee.manage');
+    Route::get('/', [EmployeeController::class, 'index'])->middleware('permission:employee.manage');
+    Route::post('/', [EmployeeController::class, 'store'])->middleware(['permission:employee.manage', 'idempotent']);
+    Route::get('/{id}', [EmployeeController::class, 'show'])->middleware('permission:employee.manage');
+    Route::patch('/{id}', [EmployeeController::class, 'update'])->middleware(['permission:employee.manage', 'idempotent']);
+    Route::delete('/{id}', [EmployeeController::class, 'destroy'])->middleware(['permission:employee.manage']);
 });
 
 // Catalog Management Routes (Phase 1B.1)
@@ -247,6 +267,9 @@ Route::middleware(['auth:sanctum', 'active', 'tenant'])->prefix('purchasing')->g
         Route::get('/{supplier}', [SupplierController::class, 'show'])->middleware('permission:purchasing.view');
         Route::put('/{supplier}', [SupplierController::class, 'update'])->middleware(['permission:purchasing.supplier.manage', 'idempotent']);
     });
+
+    // Smart Reorder Recommendations (PRD #13)
+    Route::get('/smart-reorder', [PurchaseOrderController::class, 'smartReorder'])->middleware('permission:purchasing.view');
 
     // Purchase Orders
     Route::prefix('orders')->group(function () {
@@ -423,8 +446,15 @@ Route::middleware(['auth:sanctum', 'active', 'tenant'])->prefix('dashboard')->gr
     Route::get('/', [DashboardController::class, 'index'])->middleware('permission:dashboard.view');
 });
 
+// AI Business Copilot & Analytics Routes (Phase 2 / PRD #23)
+Route::middleware(['auth:sanctum', 'active', 'tenant'])->prefix('ai')->group(function () {
+    Route::post('/copilot', [AiCopilotController::class, 'query'])->middleware(['permission:dashboard.view', 'idempotent']);
+});
+
 // Tables Domain (V1)
 Route::middleware(['auth:sanctum', 'active', 'tenant'])->prefix('tables')->group(function () {
+    Route::get('/floor-plan', [TableController::class, 'getFloorPlan'])->middleware('permission:table.view');
+    Route::post('/floor-plan', [TableController::class, 'saveFloorPlan'])->middleware(['permission:table.manage', 'idempotent']);
     Route::get('/', [TableController::class, 'index'])->middleware('permission:table.view');
     Route::post('/', [TableController::class, 'store'])->middleware(['permission:table.manage', 'idempotent']);
     Route::get('/{table}', [TableController::class, 'show'])->middleware('permission:table.view');
@@ -531,13 +561,21 @@ Route::middleware(['auth:sanctum', 'active', 'tenant'])->prefix('subscription')-
 // WhatsApp Integration Routes (V1)
 Route::middleware(['auth:sanctum', 'active', 'tenant'])->prefix('whatsapp')->group(function () {
     Route::get('/connection', [WhatsAppConnectionController::class, 'show'])->middleware('permission:whatsapp.view');
-    Route::post('/connection', [WhatsAppConnectionController::class, 'update'])->middleware(['permission:whatsapp.manage', 'idempotent']);
+    Route::match(['post', 'put'], '/connection', [WhatsAppConnectionController::class, 'update'])->middleware(['permission:whatsapp.manage', 'idempotent']);
     Route::post('/connection/verify', [WhatsAppConnectionController::class, 'verify'])->middleware(['permission:whatsapp.manage', 'idempotent']);
     Route::post('/connection/test', [WhatsAppConnectionController::class, 'testSend'])->middleware(['permission:whatsapp.send', 'idempotent']);
 
     Route::get('/messages', [WhatsAppMessageController::class, 'index'])->middleware('permission:whatsapp.view');
     Route::get('/messages/{id}', [WhatsAppMessageController::class, 'show'])->middleware('permission:whatsapp.view');
     Route::post('/messages/{id}/resend', [WhatsAppMessageController::class, 'resend'])->middleware(['permission:whatsapp.send', 'idempotent']);
+    Route::get('/preferences', [WhatsAppConnectionController::class, 'getPreferences'])->middleware('permission:whatsapp.view');
+    Route::match(['post', 'put'], '/preferences', [WhatsAppConnectionController::class, 'updatePreferences'])->middleware(['permission:whatsapp.manage', 'idempotent']);
+    Route::post('/query', [WhatsAppMessageController::class, 'query'])->middleware(['permission:whatsapp.view', 'idempotent']);
+    Route::post('/daily-summary', [WhatsAppMessageController::class, 'sendDailySummary'])->middleware(['permission:whatsapp.send', 'idempotent']);
+    Route::post('/order/{orderId}/confirmation', [WhatsAppMessageController::class, 'sendOrderConfirmation'])->middleware(['permission:whatsapp.send', 'idempotent']);
+    Route::post('/booking/{bookingId}/confirmation', [WhatsAppMessageController::class, 'sendBookingConfirmation'])->middleware(['permission:whatsapp.send', 'idempotent']);
+    Route::post('/booking/{bookingId}/reminder', [WhatsAppMessageController::class, 'sendBookingReminder'])->middleware(['permission:whatsapp.send', 'idempotent']);
+    Route::post('/promotions/send', [WhatsAppMessageController::class, 'sendPromotion'])->middleware(['permission:whatsapp.send', 'idempotent']);
     Route::post('/receipt/{saleId}/send', [WhatsAppMessageController::class, 'sendReceipt'])->middleware(['permission:whatsapp.send', 'idempotent']);
 });
 

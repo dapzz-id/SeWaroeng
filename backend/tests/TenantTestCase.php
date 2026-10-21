@@ -18,6 +18,10 @@ abstract class TenantTestCase extends TestCase
 {
     use RefreshDatabase;
 
+    protected bool $dropViews = true;
+
+    protected bool $dropTypes = true;
+
     protected function setUp(): void
     {
         parent::setUp();

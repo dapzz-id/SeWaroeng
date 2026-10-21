@@ -20,9 +20,12 @@ use App\Models\StockOpname;
 use App\Models\StockOpnameItem;
 use App\Models\StockTransfer;
 use App\Models\StockTransferItem;
+use App\Models\Tenant;
 use App\Services\Notification\NotificationService;
+use App\Services\WhatsApp\WhatsAppNotificationService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class InventoryService
@@ -195,6 +198,27 @@ class InventoryService
                             ],
                             'dedup_key' => "low_stock:item_{$item->id}:loc_{$location->id}",
                         ]);
+
+                        // Async WhatsApp Low-Stock Alert (Failure-isolated)
+                        try {
+                            $tenant = Tenant::find($tenantId);
+                            if ($tenant) {
+                                $dispatchLowStock = function () use ($tenant, $itemLoc, $item) {
+                                    try {
+                                        app(WhatsAppNotificationService::class)->queueLowStockAlert($tenant, $itemLoc);
+                                    } catch (\Throwable $e) {
+                                        Log::warning("WhatsApp low stock alert dispatch failed for item {$item->id}: {$e->getMessage()}");
+                                    }
+                                };
+                                if (DB::transactionLevel() > 0 && ! app()->environment('testing')) {
+                                    DB::afterCommit($dispatchLowStock);
+                                } else {
+                                    $dispatchLowStock();
+                                }
+                            }
+                        } catch (\Throwable $e) {
+                            Log::warning("WhatsApp low stock alert dispatch failed for item {$item->id}: {$e->getMessage()}");
+                        }
                     } else {
                         app(NotificationService::class)->resolveNotification($tenantId, "low_stock:item_{$item->id}:loc_{$location->id}");
                     }

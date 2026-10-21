@@ -20,6 +20,7 @@ use App\Services\Payment\Providers\DuitkuPaymentProvider;
 use App\Services\PosService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Tests\TenantTestCase;
@@ -158,7 +159,7 @@ class DuitkuPaymentProviderTest extends TenantTestCase
     public function test_create_invoice_sends_exact_amount_and_hmac_sha256_signature(): void
     {
         Http::fake([
-            DuitkuPaymentProvider::CREATE_INVOICE_SANDBOX_URL => function (\Illuminate\Http\Client\Request $request) {
+            DuitkuPaymentProvider::CREATE_INVOICE_SANDBOX_URL => function (Request $request) {
                 // Verify authentication headers
                 $this->assertTrue($request->hasHeader('x-duitku-timestamp'));
                 $this->assertTrue($request->hasHeader('x-duitku-signature'));
@@ -292,7 +293,7 @@ class DuitkuPaymentProviderTest extends TenantTestCase
     public function test_get_payment_method_verifies_signature_and_parses_methods(): void
     {
         Http::fake([
-            DuitkuPaymentProvider::PAYMENT_METHOD_SANDBOX_URL => function (\Illuminate\Http\Client\Request $request) {
+            DuitkuPaymentProvider::PAYMENT_METHOD_SANDBOX_URL => function (Request $request) {
                 $data = $request->data();
                 $expectedSig = hash_hmac('sha256', $this->merchantCode.'10000'.$data['datetime'], $this->apiKey);
                 $this->assertEquals($expectedSig, $data['signature']);
@@ -487,7 +488,7 @@ class DuitkuPaymentProviderTest extends TenantTestCase
         ], $this->cashier));
 
         Http::fake([
-            DuitkuPaymentProvider::STATUS_SANDBOX_URL => function (\Illuminate\Http\Client\Request $request) use ($payment) {
+            DuitkuPaymentProvider::STATUS_SANDBOX_URL => function (Request $request) use ($payment) {
                 $data = $request->data();
                 $expectedSig = hash_hmac('sha256', $this->merchantCode.$payment->reference_number, $this->apiKey);
                 $this->assertEquals($expectedSig, $data['signature']);

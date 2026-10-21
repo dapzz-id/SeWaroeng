@@ -227,6 +227,11 @@ class WhatsAppEndpointsAndConsentTest extends TenantTestCase
                     'app_secret' => 'meta_secret',
                     'webhook_verify_token' => 'meta_webhook_token',
                 ],
+                'configuration' => [
+                    'templates' => [
+                        'transactional_receipt' => ['status' => 'APPROVED', 'enabled' => true],
+                    ],
+                ],
             ]);
         });
 
@@ -234,6 +239,7 @@ class WhatsAppEndpointsAndConsentTest extends TenantTestCase
         $payload = new WhatsAppMessagePayload(
             recipientPhone: '+628123456789',
             messageType: 'transactional_receipt',
+            templateName: 'transactional_receipt',
             textBody: 'Nota Transaksi'
         );
 

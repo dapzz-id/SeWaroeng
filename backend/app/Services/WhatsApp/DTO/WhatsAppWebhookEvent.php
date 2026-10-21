@@ -15,6 +15,10 @@ class WhatsAppWebhookEvent
         public ?string $errorCode = null,
         public ?string $errorMessage = null,
         public ?string $phoneNumberId = null,
-        public array $rawPayload = []
+        public array $rawPayload = [],
+        public bool $isInbound = false,
+        public ?string $senderPhone = null,
+        public ?string $messageText = null,
+        public ?string $callbackData = null
     ) {}
 }

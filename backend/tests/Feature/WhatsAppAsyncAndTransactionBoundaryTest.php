@@ -24,16 +24,14 @@ use App\Models\WhatsAppMessage;
 use App\Services\Subscription\SubscriptionEntitlementService;
 use App\Services\WhatsApp\Providers\MockWhatsAppProvider;
 use App\Services\WhatsApp\WhatsAppNotificationService;
+use App\Services\WhatsApp\WhatsAppOutboxRecoveryService;
 use Database\Seeders\SubscriptionPlanSeeder;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Tests\TenantTestCase;
 
 class WhatsAppAsyncAndTransactionBoundaryTest extends TenantTestCase
 {
-    use RefreshDatabase;
-
     protected Tenant $tenant;
 
     protected Outlet $outlet;
@@ -49,6 +47,7 @@ class WhatsAppAsyncAndTransactionBoundaryTest extends TenantTestCase
         $this->seed(SubscriptionPlanSeeder::class);
         MockWhatsAppProvider::reset();
         config(['queue.defer_whatsapp_in_testing' => true]);
+        config(['whatsapp.force_after_commit' => true]);
 
         $tenantData = $this->createTenant('Async Boundary Test Waroeng');
         $this->tenant = $tenantData['tenant'];
@@ -283,8 +282,12 @@ class WhatsAppAsyncAndTransactionBoundaryTest extends TenantTestCase
         Queue::shouldReceive('connection')
             ->andThrow(new \RuntimeException('Connection to queue broker lost (ECONNREFUSED)'));
 
-        $service = app(WhatsAppNotificationService::class);
-        $message = $service->sendReceipt($sale);
+        try {
+            $service = app(WhatsAppNotificationService::class);
+            $message = $service->sendReceipt($sale);
+        } finally {
+            Queue::clearResolvedInstances();
+        }
 
         $this->assertNotNull($message);
         $this->assertEquals(WhatsAppMessage::STATUS_FAILED, $message->status);
@@ -349,7 +352,8 @@ class WhatsAppAsyncAndTransactionBoundaryTest extends TenantTestCase
             ->first();
 
         $this->assertNotNull($message);
-        $this->assertEquals(WhatsAppMessage::STATUS_FAILED, $message->status);
+        $this->assertEquals(WhatsAppMessage::STATUS_AMBIGUOUS_DELIVERY, $message->status);
+        $this->assertTrue($message->isAmbiguous());
         $this->assertEquals('AMBIGUOUS_TIMEOUT', $message->error_code);
         $this->assertEquals(1, $message->attempts);
         $this->assertEquals(Sale::STATUS_FINALIZED, $sale->fresh()->status);
@@ -396,5 +400,89 @@ class WhatsAppAsyncAndTransactionBoundaryTest extends TenantTestCase
         // Core domain invariants remain untouched
         $this->assertEquals(Sale::STATUS_FINALIZED, $sale->fresh()->status);
         $this->assertEquals(Payment::STATUS_SUCCEEDED, $created['payment']->fresh()->status);
+    }
+
+    public function test_fault_injection_outbox_persistence_failure_during_pos_checkout_preserves_sale_and_reconciles(): void
+    {
+        $membership = $this->tenant->memberships()->first();
+        app(TenantManager::class)->setContext(new TenantContext($this->tenant, $membership));
+        config(['whatsapp.force_after_commit' => true]);
+
+        $customer = Customer::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Fault Injection Customer',
+            'phone' => '081288889999',
+            'whatsapp_opt_in' => true,
+        ]);
+
+        $failOutboxWrite = true;
+        WhatsAppMessage::creating(function (WhatsAppMessage $msg) use (&$failOutboxWrite) {
+            if ($failOutboxWrite) {
+                throw new \PDOException('SQLSTATE[HY000]: General error: simulated outbox persistence write failure');
+            }
+        });
+
+        // 1. Finalize sale and payment within active domain transaction
+        $sale = null;
+        $payment = null;
+
+        DB::transaction(function () use ($customer, &$sale, &$payment) {
+            $created = $this->createSaleWithPayment($customer, 'SALE-FAULT-INJ-001', 3500000);
+            $sale = $created['sale'];
+            $payment = $created['payment'];
+
+            // Domain event triggers outbox persistence handler (deferred to afterCommit)
+            event(new PaymentSucceeded($payment));
+        });
+
+        // 2. Verify POS sale committed cleanly despite outbox failure!
+        $this->assertNotNull($sale);
+        $this->assertEquals(Sale::STATUS_FINALIZED, $sale->fresh()->status);
+        $this->assertEquals(Payment::STATUS_SUCCEEDED, $payment->fresh()->status);
+
+        // 3. Verify receipt outbox record was NOT recorded due to injected persistence failure
+        $outboxCount = WhatsAppMessage::where('tenant_id', $this->tenant->id)
+            ->where('idempotency_key', "whatsapp:receipt:{$sale->id}")
+            ->count();
+        $this->assertEquals(0, $outboxCount, 'Outbox record must not exist due to simulated write failure');
+        $this->assertCount(0, MockWhatsAppProvider::$sentMessages, 'No message must have been sent');
+
+        // 4. Disable fault injection so recovery service can write outbox
+        $failOutboxWrite = false;
+
+        // 5. Run domain reconciliation to discover unrecorded sale
+        $recoveryService = app(WhatsAppOutboxRecoveryService::class);
+        $stats = $recoveryService->reconcileUnrecordedReceipts(hours: 24, tenantId: $this->tenant->id);
+
+        $this->assertEquals(1, $stats['reconciled'], 'Unrecorded sale receipt must be discovered and reconciled');
+        $this->assertCount(1, MockWhatsAppProvider::$sentMessages, 'Provider must receive exactly 1 message');
+
+        $outboxRecord = WhatsAppMessage::where('tenant_id', $this->tenant->id)
+            ->where('idempotency_key', "whatsapp:receipt:{$sale->id}")
+            ->first();
+        $this->assertNotNull($outboxRecord);
+        $this->assertEquals(WhatsAppMessage::STATUS_SENT, $outboxRecord->status);
+
+        // 6. Verify retries / repeated recovery runs do NOT produce duplicate receipt records
+        $statsRetry = $recoveryService->reconcileUnrecordedReceipts(hours: 24, tenantId: $this->tenant->id);
+        $this->assertEquals(0, $statsRetry['reconciled'], 'Retry must not re-reconcile already recorded sale');
+        $this->assertEquals(0, $statsRetry['scanned'], 'Watermark cursor prevents re-scanning already processed transaction');
+        $this->assertCount(1, MockWhatsAppProvider::$sentMessages, 'Provider must not receive duplicate message');
+
+        // 7. Verify that even if cursor is reset (full historical rescan), duplicate outbox message is NOT created
+        $settings = $this->tenant->fresh()->settings ?? [];
+        unset($settings['whatsapp_receipt_reconciliation_cursor']);
+        $this->tenant->settings = $settings;
+        $this->tenant->saveQuietly();
+
+        $statsRescan = $recoveryService->reconcileUnrecordedReceipts(hours: 24, tenantId: $this->tenant->id);
+        $this->assertEquals(1, $statsRescan['already_recorded'], 'Deduplication key prevents duplicate dispatch on rescan');
+        $this->assertEquals(0, $statsRescan['reconciled']);
+        $this->assertCount(1, MockWhatsAppProvider::$sentMessages, 'Provider must not receive duplicate message');
+
+        $totalOutboxRecords = WhatsAppMessage::where('tenant_id', $this->tenant->id)
+            ->where('idempotency_key', "whatsapp:receipt:{$sale->id}")
+            ->count();
+        $this->assertEquals(1, $totalOutboxRecords, 'Exactly 1 outbox record must exist');
     }
 }

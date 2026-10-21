@@ -25,10 +25,22 @@ class _WhatsAppSettingsScreenState extends State<WhatsAppSettingsScreen> {
   final _appSecretController = TextEditingController();
   final _verifyTokenController = TextEditingController();
   final _testPhoneController = TextEditingController();
+  final _queryController = TextEditingController();
+  final _merchantPhoneController = TextEditingController();
 
   bool _isSaving = false;
   bool _isVerifying = false;
   bool _isSendingTest = false;
+  bool _isSavingPrefs = false;
+  bool _isExecutingQuery = false;
+
+  bool _dailySalesSummary = true;
+  bool _lowStock = true;
+  bool _bookingReminder = true;
+  bool _paymentSettlement = true;
+  bool _anomalyAlert = true;
+
+  WhatsAppBusinessQueryResultModel? _lastQueryResult;
 
   @override
   void initState() {
@@ -36,8 +48,24 @@ class _WhatsAppSettingsScreenState extends State<WhatsAppSettingsScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await widget.whatsAppService.fetchConnection();
       await widget.whatsAppService.fetchMessages();
+      await widget.whatsAppService.fetchPreferences();
       _populateFromConnection();
+      _populateFromPreferences();
     });
+  }
+
+  void _populateFromPreferences() {
+    final prefs = widget.whatsAppService.preferences;
+    if (prefs != null) {
+      setState(() {
+        _merchantPhoneController.text = prefs.merchantPhone ?? '';
+        _dailySalesSummary = prefs.dailySalesSummary;
+        _lowStock = prefs.lowStock;
+        _bookingReminder = prefs.bookingReminder;
+        _paymentSettlement = prefs.paymentSettlement;
+        _anomalyAlert = prefs.anomalyAlert;
+      });
+    }
   }
 
   void _populateFromConnection() {
@@ -60,6 +88,8 @@ class _WhatsAppSettingsScreenState extends State<WhatsAppSettingsScreen> {
     _appSecretController.dispose();
     _verifyTokenController.dispose();
     _testPhoneController.dispose();
+    _queryController.dispose();
+    _merchantPhoneController.dispose();
     super.dispose();
   }
 
@@ -211,7 +241,7 @@ class _WhatsAppSettingsScreenState extends State<WhatsAppSettingsScreen> {
         final error = widget.whatsAppService.errorMessage;
 
         return DefaultTabController(
-          length: 2,
+          length: 3,
           child: Scaffold(
             appBar: AppBar(
               title: const Text('WhatsApp Integration'),
@@ -219,6 +249,7 @@ class _WhatsAppSettingsScreenState extends State<WhatsAppSettingsScreen> {
               bottom: const TabBar(
                 tabs: [
                   Tab(icon: Icon(Icons.settings), text: 'Konfigurasi'),
+                  Tab(icon: Icon(Icons.notifications_active), text: 'Notifikasi & Query'),
                   Tab(icon: Icon(Icons.history), text: 'Riwayat Pesan'),
                 ],
               ),
@@ -229,6 +260,7 @@ class _WhatsAppSettingsScreenState extends State<WhatsAppSettingsScreen> {
                   onPressed: () {
                     widget.whatsAppService.fetchConnection();
                     widget.whatsAppService.fetchMessages();
+                    widget.whatsAppService.fetchPreferences();
                   },
                 ),
               ],
@@ -236,6 +268,7 @@ class _WhatsAppSettingsScreenState extends State<WhatsAppSettingsScreen> {
             body: TabBarView(
               children: [
                 _buildConfigurationTab(conn, providers, isLoading, error),
+                _buildPreferencesAndQueryTab(),
                 _buildMessagesTab(messages, isLoading),
               ],
             ),
@@ -643,5 +676,219 @@ class _WhatsAppSettingsScreenState extends State<WhatsAppSettingsScreen> {
       default:
         return Icons.error_outline;
     }
+  }
+
+  Widget _buildPreferencesAndQueryTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Section 1: Merchant Notifications Preferences
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Preferensi Notifikasi Merchant (PRD Section 19)',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Pilih kategori pesan yang otomatis dikirimkan ke nomor WhatsApp pemilik/merchant.',
+                    style: TextStyle(color: Colors.grey, fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _merchantPhoneController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nomor WhatsApp Merchant / Pemilik',
+                      hintText: '08123456789 / +628123456789',
+                      prefixIcon: Icon(Icons.phone),
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    title: const Text('Daily Sales Summary (Ringkasan Harian)'),
+                    subtitle: const Text('Omzet, jumlah transaksi, dan rata-rata ticket harian.'),
+                    value: _dailySalesSummary,
+                    onChanged: (val) => setState(() => _dailySalesSummary = val),
+                  ),
+                  SwitchListTile(
+                    title: const Text('Low-stock Alert (Peringatan Stok Menipis)'),
+                    subtitle: const Text('Peringatan saat item berada di bawah batas minimum.'),
+                    value: _lowStock,
+                    onChanged: (val) => setState(() => _lowStock = val),
+                  ),
+                  SwitchListTile(
+                    title: const Text('Booking Reminder (Pengingat Reservasi)'),
+                    subtitle: const Text('Pengingat jadwal tamu sebelum reservasi dimulai.'),
+                    value: _bookingReminder,
+                    onChanged: (val) => setState(() => _bookingReminder = val),
+                  ),
+                  SwitchListTile(
+                    title: const Text('Payment Settlement (Status Pencairan Dana)'),
+                    subtitle: const Text('Notifikasi ketika dana gateway berhasil dicairkan (settled).'),
+                    value: _paymentSettlement,
+                    onChanged: (val) => setState(() => _paymentSettlement = val),
+                  ),
+                  SwitchListTile(
+                    title: const Text('Anomaly Alert (Peringatan Anomali Operasional)'),
+                    subtitle: const Text('Peringatan selisih kas penutupan shift dan ketidaksesuaian.'),
+                    value: _anomalyAlert,
+                    onChanged: (val) => setState(() => _anomalyAlert = val),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _isSavingPrefs
+                          ? null
+                          : () async {
+                              setState(() => _isSavingPrefs = true);
+                              final success = await widget.whatsAppService.savePreferences(
+                                WhatsAppPreferencesModel(
+                                  merchantPhone: _merchantPhoneController.text.trim().isEmpty
+                                      ? null
+                                      : _merchantPhoneController.text.trim(),
+                                  dailySalesSummary: _dailySalesSummary,
+                                  lowStock: _lowStock,
+                                  bookingReminder: _bookingReminder,
+                                  paymentSettlement: _paymentSettlement,
+                                  anomalyAlert: _anomalyAlert,
+                                ),
+                              );
+                              if (mounted) {
+                                setState(() => _isSavingPrefs = false);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(success
+                                        ? 'Preferensi notifikasi berhasil disimpan.'
+                                        : 'Gagal menyimpan preferensi notifikasi.'),
+                                    backgroundColor: success ? Colors.green : Colors.red,
+                                  ),
+                                );
+                              }
+                            },
+                      icon: _isSavingPrefs
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.save),
+                      label: const Text('Simpan Preferensi Notifikasi'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Section 2: Tanya Bisnis via Natural Language Safe Query
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Tanya Bisnis via WhatsApp (Natural Language Safe Query)',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Uji coba query bahasa alami yang dipetakan secara aman ke metrik bisnis terisolasi.',
+                    style: TextStyle(color: Colors.grey, fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _queryController,
+                    decoration: InputDecoration(
+                      labelText: 'Pertanyaan Bisnis',
+                      hintText: 'Contoh: "Omzet hari ini?", "Produk paling laku minggu ini?"',
+                      prefixIcon: const Icon(Icons.question_answer),
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(
+                        icon: const Icon(Icons.send),
+                        onPressed: _isExecutingQuery
+                            ? null
+                            : () async {
+                                final text = _queryController.text.trim();
+                                if (text.isEmpty) return;
+                                setState(() => _isExecutingQuery = true);
+                                final res = await widget.whatsAppService.executeBusinessQuery(text);
+                                if (mounted) {
+                                  setState(() {
+                                    _lastQueryResult = res;
+                                    _isExecutingQuery = false;
+                                  });
+                                }
+                              },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      ActionChip(
+                        label: const Text('Omzet hari ini?'),
+                        onPressed: () {
+                          _queryController.text = 'Omzet hari ini?';
+                        },
+                      ),
+                      ActionChip(
+                        label: const Text('Produk paling laku minggu ini?'),
+                        onPressed: () {
+                          _queryController.text = 'Produk paling laku minggu ini?';
+                        },
+                      ),
+                    ],
+                  ),
+                  if (_lastQueryResult != null) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.blue.shade200),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                _lastQueryResult!.success ? Icons.check_circle : Icons.info,
+                                color: _lastQueryResult!.success ? Colors.green : Colors.blue,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Intent: ${_lastQueryResult!.intent}',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                          const Divider(),
+                          Text(
+                            _lastQueryResult!.replyText,
+                            style: const TextStyle(fontSize: 13, height: 1.4),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

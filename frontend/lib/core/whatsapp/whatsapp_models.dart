@@ -134,3 +134,67 @@ class WhatsAppMessageModel {
     );
   }
 }
+
+class WhatsAppPreferencesModel {
+  final String? merchantPhone;
+  final bool dailySalesSummary;
+  final bool lowStock;
+  final bool bookingReminder;
+  final bool paymentSettlement;
+  final bool anomalyAlert;
+
+  const WhatsAppPreferencesModel({
+    this.merchantPhone,
+    required this.dailySalesSummary,
+    required this.lowStock,
+    required this.bookingReminder,
+    required this.paymentSettlement,
+    required this.anomalyAlert,
+  });
+
+  factory WhatsAppPreferencesModel.fromJson(Map<String, dynamic> json) {
+    return WhatsAppPreferencesModel(
+      merchantPhone: json['merchant_phone'] as String?,
+      dailySalesSummary: json['daily_sales_summary'] as bool? ?? true,
+      lowStock: json['low_stock'] as bool? ?? true,
+      bookingReminder: json['booking_reminder'] as bool? ?? true,
+      paymentSettlement: json['payment_settlement'] as bool? ?? true,
+      anomalyAlert: json['anomaly_alert'] as bool? ?? true,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'merchant_phone': merchantPhone,
+      'daily_sales_summary': dailySalesSummary,
+      'low_stock': lowStock,
+      'booking_reminder': bookingReminder,
+      'payment_settlement': paymentSettlement,
+      'anomaly_alert': anomalyAlert,
+    };
+  }
+}
+
+class WhatsAppBusinessQueryResultModel {
+  final String intent;
+  final bool success;
+  final String replyText;
+  final Map<String, dynamic> data;
+
+  const WhatsAppBusinessQueryResultModel({
+    required this.intent,
+    required this.success,
+    required this.replyText,
+    required this.data,
+  });
+
+  factory WhatsAppBusinessQueryResultModel.fromJson(Map<String, dynamic> json) {
+    return WhatsAppBusinessQueryResultModel(
+      intent: json['intent'] as String? ?? 'unsupported_query',
+      success: json['success'] as bool? ?? false,
+      replyText: json['reply_text'] as String? ?? '',
+      data: json['data'] != null ? Map<String, dynamic>.from(json['data'] as Map) : {},
+    );
+  }
+}
+

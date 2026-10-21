@@ -41,21 +41,35 @@ class SubscriptionEntitlementService
     public function getSubscription(Tenant $tenant): ?Subscription
     {
         return $this->tenantManager->runForTenant($tenant, function () use ($tenant) {
-            return Cache::remember($this->cacheKey((string) $tenant->id), 300, function () use ($tenant) {
-                $subscription = Subscription::with(['plan.entitlements', 'addOnAssignments.addOn'])
-                    ->where('tenant_id', $tenant->id)
-                    ->latest('created_at')
-                    ->first();
+            $key = $this->cacheKey((string) $tenant->id);
+            $cached = Cache::get($key);
 
-                if (! $subscription) {
-                    $freePlan = SubscriptionPlan::where('code', SubscriptionPlan::CODE_FREE)->first();
-                    if ($freePlan) {
-                        $subscription = app(SubscriptionService::class)->createTrialSubscription($tenant, $freePlan);
-                    }
+            if ($cached instanceof Subscription) {
+                return $cached;
+            }
+
+            // If stale, incomplete class, or missing, invalidate and re-fetch from database
+            if ($cached !== null) {
+                Cache::forget($key);
+            }
+
+            $subscription = Subscription::with(['plan.entitlements', 'addOnAssignments.addOn'])
+                ->where('tenant_id', $tenant->id)
+                ->latest('created_at')
+                ->first();
+
+            if (! $subscription) {
+                $freePlan = SubscriptionPlan::where('code', SubscriptionPlan::CODE_FREE)->first();
+                if ($freePlan) {
+                    $subscription = app(SubscriptionService::class)->createTrialSubscription($tenant, $freePlan);
                 }
+            }
 
-                return $subscription;
-            });
+            if ($subscription) {
+                Cache::put($key, $subscription, 300);
+            }
+
+            return $subscription;
         });
     }
 

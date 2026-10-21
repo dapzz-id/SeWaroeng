@@ -54,7 +54,11 @@ class WhatsAppProviderManager
         $normalized = strtolower(trim((string) $providerName));
 
         if ($normalized === '' || $normalized === 'null') {
-            $normalized = 'mock';
+            $normalized = app()->environment('production') ? 'meta_cloud' : 'mock';
+        }
+
+        if (app()->environment('production') && $normalized === 'mock') {
+            throw new UnsupportedWhatsAppProviderException('Mock WhatsApp provider is prohibited in production environment.');
         }
 
         if (! isset($this->providers[$normalized])) {
@@ -90,7 +94,7 @@ class WhatsAppProviderManager
         /** @var TenantWhatsAppConnection|null $connection */
         $connection = $query->first();
 
-        $resolvedProviderName = $connection?->provider ?? ($providerName ?? 'mock');
+        $resolvedProviderName = $connection?->provider ?? ($providerName ?? (app()->environment('production') ? 'meta_cloud' : 'mock'));
         $provider = $this->resolve($resolvedProviderName);
 
         return [

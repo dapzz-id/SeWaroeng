@@ -47,12 +47,19 @@ return [
         'base_url' => env('MIDTRANS_BASE_URL', null),
     ],
 
+    'duitku' => [
+        'merchant_code' => env('DUITKU_MERCHANT_CODE', ''),
+        'api_key' => env('DUITKU_API_KEY', ''),
+        'is_production' => (bool) env('DUITKU_IS_PRODUCTION', false),
+    ],
+
     'whatsapp' => [
+        'support_contact' => env('SEWAROENG_SUPPORT_CONTACT', null),
         'meta' => [
-            'graph_version' => env('META_WHATSAPP_GRAPH_VERSION', 'v21.0'),
-            'app_secret' => env('META_WHATSAPP_APP_SECRET', null),
-            'verify_token' => env('META_WHATSAPP_VERIFY_TOKEN', null),
-            'supported_versions' => ['v20.0', 'v21.0', 'v22.0'],
+            'graph_version' => env('META_WHATSAPP_GRAPH_VERSION', env('WHATSAPP_GRAPH_VERSION', 'v21.0')),
+            'app_secret' => env('META_WHATSAPP_APP_SECRET', env('WHATSAPP_WEBHOOK_SECRET', env('WHATSAPP_APP_SECRET', null))),
+            'verify_token' => env('META_WHATSAPP_VERIFY_TOKEN', env('WHATSAPP_VERIFY_TOKEN', null)),
+            'supported_versions' => ['v21.0', 'v22.0', 'v25.0'],
         ],
     ],
 

@@ -87,8 +87,7 @@ class StagingQaPrepCommand extends Command
             $this->line(" - Target QR Base:    <fg=yellow>{$appUrl}</>");
             $this->line(' - Notice: Generated QR artifacts point to a non-staging target');
             $this->line('   and are NOT valid for physical smartphone QA on live staging!');
-            $this->line(' - For physical QA: run on staging with APP_ENV=staging, APP_DEBUG=false,');
-            $this->line('   and APP_URL=https://staging.sewaroeng.id');
+            $this->line('   and APP_URL=https://<staging-api-host>');
             $this->warn('*****************************************************************');
         } else {
             $this->newLine();

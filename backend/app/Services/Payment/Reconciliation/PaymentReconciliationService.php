@@ -9,8 +9,12 @@ use App\Models\Payment;
 use App\Models\PaymentAttempt;
 use App\Models\PaymentReconciliation;
 use App\Models\PaymentRefund;
+use App\Models\Tenant;
+use App\Services\WhatsApp\WhatsAppNotificationService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class PaymentReconciliationService
@@ -196,6 +200,34 @@ class PaymentReconciliationService
                 ],
                 'created_at' => now(),
             ]);
+
+            // Async WhatsApp Payment Settlement Alert (Failure-isolated)
+            if ($settlementStatus === PaymentReconciliation::SETTLEMENT_SETTLED) {
+                try {
+                    $tenant = Tenant::find($tenantId);
+                    if ($tenant) {
+                        $dispatchSettlement = function () use ($tenant, $reconciliation) {
+                            try {
+                                app(WhatsAppNotificationService::class)->queuePaymentSettlementAlert($tenant, [
+                                    'reference' => $reconciliation->provider_reference,
+                                    'provider' => $reconciliation->provider,
+                                    'settled_amount_minor' => $reconciliation->provider_amount_minor,
+                                    'transaction_count' => 1,
+                                ]);
+                            } catch (\Throwable $e) {
+                                Log::warning("WhatsApp settlement alert dispatch failed for recon {$reconciliation->id}: {$e->getMessage()}");
+                            }
+                        };
+                        if (DB::transactionLevel() > 0 && ! app()->environment('testing')) {
+                            DB::afterCommit($dispatchSettlement);
+                        } else {
+                            $dispatchSettlement();
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning("WhatsApp settlement alert dispatch failed for recon {$reconciliation->id}: {$e->getMessage()}");
+                }
+            }
 
             return $reconciliation->fresh(['payment.sale', 'outlet', 'reconciler', 'resolver']);
         });

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 /// Service responsible for managing a stable, installation-level device identifier.
@@ -12,10 +13,10 @@ class DeviceService {
   static const String _deviceIdFileName = 'sewaroeng_device.id';
   static final Uuid _uuid = const Uuid();
 
-  final Directory _storageDirectory;
+  final Directory? _storageDirectory;
   String? _cachedDeviceId;
 
-  DeviceService(this._storageDirectory);
+  DeviceService([this._storageDirectory]);
 
   /// Returns the persistent device ID (UUIDv7 format).
   /// Generates a new UUIDv7 if one does not already exist.
@@ -24,27 +25,41 @@ class DeviceService {
       return _cachedDeviceId!;
     }
 
-    final file = File('${_storageDirectory.path}/$_deviceIdFileName');
-    if (await file.exists()) {
-      final content = (await file.readAsString()).trim();
-      if (content.isNotEmpty) {
-        _cachedDeviceId = content;
-        return _cachedDeviceId!;
-      }
+    if (!kIsWeb && _storageDirectory != null) {
+      try {
+        final dir = _storageDirectory;
+        final file = File('${dir.path}/$_deviceIdFileName');
+        if (await file.exists()) {
+          final content = (await file.readAsString()).trim();
+          if (content.isNotEmpty) {
+            _cachedDeviceId = content;
+            return _cachedDeviceId!;
+          }
+        }
+
+        // Generate new UUIDv7
+        final newId = _uuid.v7();
+        await file.writeAsString(newId);
+        _cachedDeviceId = newId;
+        return newId;
+      } catch (_) {}
     }
 
-    // Generate new UUIDv7
-    final newId = _uuid.v7();
-    await file.writeAsString(newId);
-    _cachedDeviceId = newId;
-    return newId;
+    final fallbackId = _uuid.v7();
+    _cachedDeviceId = fallbackId;
+    return fallbackId;
   }
 
   /// Resets the device identifier (e.g. on complete wipe/factory reset)
   Future<void> resetDeviceId() async {
-    final file = File('${_storageDirectory.path}/$_deviceIdFileName');
-    if (await file.exists()) {
-      await file.delete();
+    if (!kIsWeb && _storageDirectory != null) {
+      try {
+        final dir = _storageDirectory;
+        final file = File('${dir.path}/$_deviceIdFileName');
+        if (await file.exists()) {
+          await file.delete();
+        }
+      } catch (_) {}
     }
     _cachedDeviceId = null;
   }

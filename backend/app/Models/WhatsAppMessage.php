@@ -24,6 +24,8 @@ class WhatsAppMessage extends Model
 
     public const STATUS_FAILED = 'failed';
 
+    public const STATUS_AMBIGUOUS_DELIVERY = 'ambiguous_delivery';
+
     public const TYPE_TRANSACTIONAL_RECEIPT = 'transactional_receipt';
 
     public const TYPE_TRANSACTIONAL_ORDER = 'transactional_order';
@@ -31,6 +33,43 @@ class WhatsAppMessage extends Model
     public const TYPE_LOYALTY_NOTIFICATION = 'loyalty_notification';
 
     public const TYPE_MARKETING_PROMO = 'marketing_promo';
+
+    // PRD Section 19 Merchant-side notification types
+    public const TYPE_MERCHANT_DAILY_SUMMARY = 'merchant_daily_summary';
+
+    public const TYPE_MERCHANT_LOW_STOCK = 'merchant_low_stock';
+
+    public const TYPE_MERCHANT_BOOKING_REMINDER = 'merchant_booking_reminder';
+
+    public const TYPE_MERCHANT_SETTLEMENT = 'merchant_settlement';
+
+    public const TYPE_MERCHANT_ANOMALY = 'merchant_anomaly';
+
+    public const TYPE_MERCHANT_QUERY_REPLY = 'merchant_query_reply';
+
+    // PRD Section 19 Customer-side message types
+    public const TYPE_ORDER_CONFIRMATION = 'order_confirmation';
+
+    public const TYPE_BOOKING_CONFIRMATION = 'booking_confirmation';
+
+    public const TYPE_BOOKING_REMINDER = 'booking_reminder';
+
+    public const TYPE_ORDER_STATUS_UPDATE = 'order_status_update';
+
+    /**
+     * Determine if this message is a merchant-directed notification.
+     */
+    public function isMerchantMessage(): bool
+    {
+        return in_array($this->message_type, [
+            self::TYPE_MERCHANT_DAILY_SUMMARY,
+            self::TYPE_MERCHANT_LOW_STOCK,
+            self::TYPE_MERCHANT_BOOKING_REMINDER,
+            self::TYPE_MERCHANT_SETTLEMENT,
+            self::TYPE_MERCHANT_ANOMALY,
+            self::TYPE_MERCHANT_QUERY_REPLY,
+        ], true);
+    }
 
     protected $table = 'whatsapp_messages';
 
@@ -110,16 +149,63 @@ class WhatsAppMessage extends Model
         return $this->status === self::STATUS_FAILED;
     }
 
+    public function isAmbiguous(): bool
+    {
+        return $this->status === self::STATUS_AMBIGUOUS_DELIVERY;
+    }
+
+    /**
+     * Mark message delivery state as ambiguous (e.g. provider timeout or connection crash).
+     * Prevents blind re-transmission while awaiting webhook or careful recovery audit.
+     */
+    public function markAmbiguousDelivery(?string $reason = null, ?string $errorCode = null): void
+    {
+        if (in_array($this->status, [self::STATUS_SENT, self::STATUS_DELIVERED, self::STATUS_READ], true)) {
+            return;
+        }
+
+        $this->update([
+            'status' => self::STATUS_AMBIGUOUS_DELIVERY,
+            'error_code' => $errorCode ?? 'AMBIGUOUS_DELIVERY',
+            'error_message' => $reason ?? 'Ambiguous delivery: provider response unconfirmed before worker completion.',
+            'last_attempt_at' => now(),
+        ]);
+    }
+
     /**
      * Mark message as actively transmitting to provider.
      */
     public function markSending(): void
     {
+        if (in_array($this->status, [self::STATUS_SENT, self::STATUS_DELIVERED, self::STATUS_READ], true)) {
+            return;
+        }
+
         $this->update([
             'status' => self::STATUS_SENDING,
             'attempts' => $this->attempts + 1,
             'last_attempt_at' => now(),
         ]);
+    }
+
+    /**
+     * Verify whether a status transition satisfies the monotonic state machine.
+     */
+    public function canTransitionTo(string $targetStatus): bool
+    {
+        if ($this->status === self::STATUS_READ) {
+            return $targetStatus === self::STATUS_READ;
+        }
+
+        if ($this->status === self::STATUS_DELIVERED) {
+            return in_array($targetStatus, [self::STATUS_DELIVERED, self::STATUS_READ], true);
+        }
+
+        if ($this->status === self::STATUS_SENT) {
+            return in_array($targetStatus, [self::STATUS_SENT, self::STATUS_DELIVERED, self::STATUS_READ], true);
+        }
+
+        return true;
     }
 
     /**

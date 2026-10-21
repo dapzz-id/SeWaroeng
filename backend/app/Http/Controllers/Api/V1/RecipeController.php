@@ -62,6 +62,31 @@ class RecipeController extends Controller
     {
         $tenantId = app(TenantContext::class)->id();
 
+        // Auto-provision product & variant if recipe is created standalone
+        if (! $request->filled('product_variant_id') && ! $request->filled('inventory_item_id') && $request->filled('name')) {
+            $slug = \Illuminate\Support\Str::slug($request->input('name'));
+            if (empty($slug)) {
+                $slug = 'recipe-'.substr(md5(uniqid()), 0, 8);
+            }
+            $product = \App\Models\Product::firstOrCreate(
+                ['tenant_id' => $tenantId, 'slug' => $slug],
+                ['name' => $request->input('name'), 'status' => 'active']
+            );
+            $variant = \App\Models\ProductVariant::where('tenant_id', $tenantId)
+                ->where('product_id', $product->id)
+                ->whereDoesntHave('recipe')
+                ->first();
+            if (! $variant) {
+                $variant = \App\Models\ProductVariant::create([
+                    'tenant_id' => $tenantId,
+                    'product_id' => $product->id,
+                    'name' => $request->filled('code') ? 'Porsi '.$request->input('code') : 'Porsi Standar',
+                    'is_default' => ! \App\Models\ProductVariant::where('product_id', $product->id)->exists(),
+                ]);
+            }
+            $request->merge(['product_variant_id' => $variant->id]);
+        }
+
         $validated = $request->validate([
             'product_variant_id' => [
                 'nullable', 'uuid', 'required_without:inventory_item_id', 'prohibited_unless:inventory_item_id,null',

@@ -15,9 +15,11 @@ use App\Models\TableSession;
 use App\Models\Tenant;
 use App\Services\Notification\NotificationService;
 use App\Services\Subscription\SubscriptionEntitlementService;
+use App\Services\WhatsApp\WhatsAppNotificationService;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class BookingService
@@ -168,6 +170,26 @@ class BookingService
                         'table_id' => $table?->id,
                     ],
                 ]);
+
+                // Async WhatsApp Booking Confirmation (Failure-isolated)
+                try {
+                    if (in_array($booking->status, [Booking::STATUS_CONFIRMED, Booking::STATUS_PENDING], true) && ($booking->customer_id || ! empty($booking->customer_contact_snapshot))) {
+                        $dispatchBooking = function () use ($booking) {
+                            try {
+                                app(WhatsAppNotificationService::class)->queueBookingConfirmation($booking);
+                            } catch (\Throwable $e) {
+                                Log::warning("WhatsApp booking confirmation dispatch failed for booking {$booking->id}: {$e->getMessage()}");
+                            }
+                        };
+                        if (DB::transactionLevel() > 0 && ! app()->environment('testing')) {
+                            DB::afterCommit($dispatchBooking);
+                        } else {
+                            $dispatchBooking();
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning("WhatsApp booking confirmation dispatch failed for booking {$booking->id}: {$e->getMessage()}");
+                }
 
                 return $booking;
             });

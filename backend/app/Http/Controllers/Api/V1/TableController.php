@@ -210,6 +210,152 @@ class TableController extends Controller
     }
 
     /**
+     * Get visual floor plan and table layouts for an outlet.
+     */
+    public function getFloorPlan(Request $request): JsonResponse
+    {
+        $tenantId = app(TenantContext::class)->id();
+        $outletId = $request->query('outlet_id');
+
+        if (! $outletId) {
+            return ApiResponse::error(message: 'Outlet ID is required.', status: Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $this->assertOutletAccess($outletId);
+
+        $outlet = \App\Models\Outlet::where('tenant_id', $tenantId)->findOrFail($outletId);
+
+        $defaultFloorPlan = [
+            'canvas_width' => 1000,
+            'canvas_height' => 700,
+            'elements' => [
+                [
+                    'id' => 'zone-indoor',
+                    'type' => 'zone',
+                    'x' => 40,
+                    'y' => 40,
+                    'width' => 440,
+                    'height' => 620,
+                    'label' => 'Area Indoor (AC & Bebas Asap)',
+                    'color' => '#1e293b',
+                ],
+                [
+                    'id' => 'zone-outdoor',
+                    'type' => 'zone',
+                    'x' => 520,
+                    'y' => 40,
+                    'width' => 440,
+                    'height' => 620,
+                    'label' => 'Area Outdoor (Smoking & Taman)',
+                    'color' => '#0f291e',
+                ],
+                [
+                    'id' => 'wall-divider',
+                    'type' => 'wall',
+                    'x1' => 500,
+                    'y1' => 40,
+                    'x2' => 500,
+                    'y2' => 660,
+                    'thickness' => 6,
+                    'color' => '#475569',
+                ],
+                [
+                    'id' => 'text-entrance',
+                    'type' => 'text',
+                    'x' => 220,
+                    'y' => 640,
+                    'label' => '🚪 PINTU MASUK UTAMA',
+                    'font_size' => 14,
+                    'color' => '#94a3b8',
+                ],
+                [
+                    'id' => 'text-cashier',
+                    'type' => 'text',
+                    'x' => 80,
+                    'y' => 80,
+                    'label' => '☕ KASIR & BAR',
+                    'font_size' => 14,
+                    'color' => '#38bdf8',
+                ],
+            ],
+        ];
+
+        $floorPlan = $outlet->settings['floor_plan'] ?? $defaultFloorPlan;
+
+        $tables = Table::where('tenant_id', $tenantId)
+            ->where('outlet_id', $outletId)
+            ->where('is_active', true)
+            ->with(['activeSession', 'bookings'])
+            ->orderBy('code')
+            ->get()
+            ->map(fn (Table $t) => $this->formatTable($t, true))
+            ->values();
+
+        return ApiResponse::success(data: [
+            'outlet_id' => $outlet->id,
+            'outlet_name' => $outlet->name,
+            'floor_plan' => $floorPlan,
+            'tables' => $tables,
+        ]);
+    }
+
+    /**
+     * Save floor plan canvas and table layout coordinates.
+     */
+    public function saveFloorPlan(Request $request): JsonResponse
+    {
+        $tenantId = app(TenantContext::class)->id();
+        $validated = $request->validate([
+            'outlet_id' => ['required', 'uuid'],
+            'floor_plan' => ['required', 'array'],
+            'tables' => ['nullable', 'array'],
+            'tables.*.id' => ['required', 'uuid'],
+            'tables.*.x' => ['nullable', 'numeric'],
+            'tables.*.y' => ['nullable', 'numeric'],
+            'tables.*.width' => ['nullable', 'numeric'],
+            'tables.*.height' => ['nullable', 'numeric'],
+            'tables.*.shape' => ['nullable', 'string', 'in:rect,circle,square'],
+            'tables.*.zone' => ['nullable', 'string'],
+            'tables.*.name' => ['nullable', 'string', 'max:255'],
+            'tables.*.capacity' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        $this->assertOutletAccess($validated['outlet_id']);
+
+        $outlet = \App\Models\Outlet::where('tenant_id', $tenantId)->findOrFail($validated['outlet_id']);
+
+        $settings = $outlet->settings ?? [];
+        $settings['floor_plan'] = $validated['floor_plan'];
+        $outlet->settings = $settings;
+        $outlet->save();
+
+        if (! empty($validated['tables'])) {
+            foreach ($validated['tables'] as $tData) {
+                $table = Table::where('tenant_id', $tenantId)
+                    ->where('outlet_id', $outlet->id)
+                    ->find($tData['id']);
+
+                if ($table) {
+                    $meta = $table->metadata ?? [];
+                    if (isset($tData['x'])) $meta['x'] = (float) $tData['x'];
+                    if (isset($tData['y'])) $meta['y'] = (float) $tData['y'];
+                    if (isset($tData['width'])) $meta['width'] = (float) $tData['width'];
+                    if (isset($tData['height'])) $meta['height'] = (float) $tData['height'];
+                    if (isset($tData['shape'])) $meta['shape'] = $tData['shape'];
+                    if (isset($tData['zone'])) $meta['zone'] = $tData['zone'];
+
+                    $table->metadata = $meta;
+                    if (isset($tData['name'])) $table->name = trim($tData['name']);
+                    if (isset($tData['capacity'])) $table->capacity = (int) $tData['capacity'];
+                    $table->save();
+                }
+            }
+        }
+
+        return $this->getFloorPlan($request->merge(['outlet_id' => $outlet->id]));
+    }
+
+    /**
      * Assert outlet access for multi-outlet users.
      */
     protected function assertOutletAccess(string $outletId): void
@@ -232,6 +378,7 @@ class TableController extends Controller
             'status' => $table->status,
             'qr_token' => $table->qr_token,
             'is_active' => $table->is_active,
+            'metadata' => $table->metadata ?? [],
             'active_session' => $table->activeSession,
             'created_at' => $table->created_at?->toIso8601String(),
             'updated_at' => $table->updated_at?->toIso8601String(),

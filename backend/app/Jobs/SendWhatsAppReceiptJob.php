@@ -225,7 +225,10 @@ class SendWhatsAppReceiptJob implements ShouldQueue
                     'Rp '.number_format($sale->total_minor / 100, 0, ',', '.'),
                 ],
                 textBody: $formattedText,
-                metadata: ['sale_id' => $sale->id]
+                metadata: [
+                    'sale_id' => $sale->id,
+                    'message_id' => $message->id,
+                ]
             );
 
             $message->markSending();
@@ -235,11 +238,15 @@ class SendWhatsAppReceiptJob implements ShouldQueue
             if ($result->success && $result->providerMessageId) {
                 $message->markSent($result->providerMessageId);
             } else {
-                // Record failure details immediately on the message
-                $message->markFailed(
-                    errorCode: $result->errorCode ?? 'SEND_FAILED',
-                    errorMessage: $result->errorMessage ?? 'Failed to send WhatsApp message'
-                );
+                // Record failure details or ambiguous delivery state
+                if ($result->errorCode === 'AMBIGUOUS_TIMEOUT') {
+                    $message->markAmbiguousDelivery($result->errorMessage, $result->errorCode);
+                } else {
+                    $message->markFailed(
+                        errorCode: $result->errorCode ?? 'SEND_FAILED',
+                        errorMessage: $result->errorMessage ?? 'Failed to send WhatsApp message'
+                    );
+                }
 
                 if ($result->isRetryable && $this->attempts() < $this->tries && $this->job) {
                     $delay = $this->backoff[$this->attempts() - 1] ?? 30;

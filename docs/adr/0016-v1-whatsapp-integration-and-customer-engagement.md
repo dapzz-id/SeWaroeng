@@ -115,16 +115,23 @@ pending → sending → sent → delivered → read
 
 ---
 
-### Decision 6: Asynchronous Delivery, Commit Boundary & Queue Retries
+### Decision 6: Asynchronous Delivery, Commit Boundary, Queue Retries & Durable Outbox Recovery
 
 1. **After-Commit Queuing**: `PaymentSucceeded` and `SaleFinalized` events create an outbox record (`WhatsAppMessage` status `pending`) and dispatch `SendWhatsAppReceiptJob` with `$this->afterCommit = true`. No synchronous provider HTTP calls take place during open database transactions.
 2. **Transaction Rollback Protection**: If a database transaction rolls back, all after-commit queue jobs are discarded by Laravel's `DatabaseTransactionsManager`. Zero messages are sent on rollbacks.
 3. **Durable Enqueue Fault Isolation**: If queue broker connection fails during dispatch (e.g. Redis outage), the exception is trapped without aborting the POS or payment transaction. The outbox record captures `status = failed`, `error_code = 'ENQUEUE_FAILED'`, preserving full observability and reprocessing ability.
-4. **Queue Driver Requirement**: Production deployments require durable queue drivers (`database` or `redis`) with active workers (`php artisan queue:work`). `QUEUE_CONNECTION=sync` does not satisfy production asynchronous isolation.
+4. **Queue Driver Requirement**: Production deployments require durable queue drivers (`database` or `redis`) with active workers (`php artisan queue:work --queue=default`). `QUEUE_CONNECTION=sync` does not satisfy production asynchronous isolation.
 5. **Idempotency Key**: Outbound receipt notifications generate unique keys: `whatsapp:receipt:{sale_id}`. Duplicate checkout events or retried webhook triggers are deterministically deduplicated.
 6. **Bounded Retry Strategy**: Bounded retries (`$tries = 3`, `$backoff = [5, 15, 45]`) for transient errors (HTTP 429, 500, ambiguous timeouts). Ambiguous timeouts are classified as `AMBIGUOUS_TIMEOUT` and retried safely without assuming definitive failure.
 7. **Terminal Failure Protection**: Non-retryable errors (invalid credentials, template rejections) fail terminally without wasting retry budget.
 8. **Failure Visibility & Resend**: Authorized manual resend endpoint (`POST /api/v1/whatsapp/messages/{id}/resend`) verifies recipient consent and opt-out prior to resending.
+9. **Durable Outbox Recovery Dispatcher (`WhatsAppOutboxRecoveryService`)**:
+   - Independent background recovery daemon / scheduled task (`php artisan whatsapp:outbox-recover` scheduled every 5 minutes via `routes/console.php` with `withoutOverlapping()`).
+   - Recovers: (a) stranded records with `status = 'pending'` older than 2 minutes where application crashed between commit and queue enqueue, (b) failed enqueue records (`status = 'failed'`, `error_code = 'ENQUEUE_FAILED'`), and (c) worker in-flight crashes (`status = 'sending'` older than 15 minutes without `provider_message_id`).
+   - Idempotency & Locking: Atomic state updates (`status = 'sending'`, incremented `attempts`) prevent double-dispatch between concurrent workers and recovery tasks.
+   - Terminal Status Guard: Messages in `sent`, `delivered`, or `read` are never resent.
+   - Customer Opt-Out Re-check: If customer opted out between transaction commit and recovery, recovery aborts dispatch with `CUSTOMER_OPTED_OUT`.
+   - Domain Invariant: Recovery never mutates POS Sales, Payments, accounting journals, or inventory ledgers.
 
 ---
 
@@ -152,24 +159,67 @@ pending → sending → sent → delivered → read
 
 ### Decision 9: Graph API Version Policy & Template Contracts
 
-1. **Configurable Graph API Version**: Server-side configuration `services.whatsapp.meta.graph_version` with validated supported versions (`v20.0`, `v21.0`, `v22.0`). Magic strings or expired versions (`v18.0`, `v19.0`) are strictly rejected on load with `\InvalidArgumentException` and 422 API validation.
+1. **Configurable Graph API Version & Official Lifecycle**:
+   - **Audit Date**: 2026-10-10.
+   - **Audit Acuan**: Meta Graph API Changelog & WhatsApp Business Platform Documentation.
+   - **Expired Version Removal**: `v20.0` reached End-of-Life on September 24, 2026. Whitelist support is removed; requests specifying `v20.0` are rejected immediately with HTTP 422 / `\InvalidArgumentException`.
+   - **Active Supported Versions**:
+     - `v21.0`: Released October 2, 2024 — Active until January 21, 2027 (Default).
+     - `v22.0`: Released January 21, 2025 — Active until May 20, 2027 (Supported).
+   - **Evaluation of Newer Versions (`v26.0`, etc.)**: Graph API `v26.0` (released July 29, 2026) and intermediate versions (`v23.0`-`v25.0`) introduce breaking changes (e.g. Commerce Order Management API deprecation, ad targeting constraints). Newer versions are NOT assumed automatically compatible for WhatsApp Cloud API message contracts without live certified testing and are excluded from the allowlist.
+   - **Zero Silent Fallback**: Unsupported and expired versions are strictly rejected on configuration load and API update without silent fallback.
 2. **Approved Template Semantics**: Templates configured on connections are validated prior to dispatch. `REJECTED` templates fail fast with `TEMPLATE_REJECTED` without network calls.
 3. **Log & Payload Sanitization**: All provider tokens, credentials, and authorization headers are recursively redacted (`[REDACTED]`) before logging or storing raw response metadata.
 
 ---
 
-### Decision 10: Real Provider Integration Status
+### Decision 11: PRD Section 19 Functional Coverage — Merchant Notifications, Customer Engagement & Safe Natural Language Query
 
-- **Unit & Integration Verification**: Verified with `MockWhatsAppProvider` across all failure scenarios, rate limits, timeouts, and state progressions (51 backend tests across 7 test suites, 7 Flutter tests).
-- **Official Spec Compliance**: `MetaCloudWhatsAppProvider` written strictly to Meta WhatsApp Cloud API specifications.
+To achieve complete functional closure for V1 WhatsApp requirements (PRD Section 19):
+
+1. **Merchant-Side Operational Notifications**:
+   - **Daily Sales Summary** (`TYPE_MERCHANT_DAILY_SUMMARY`): Aggregates daily net sales, count, and average order value via `DashboardService` read model; triggered manually or scheduled daily at 22:00 via `whatsapp:send-daily-summary`.
+   - **Low-Stock Alert** (`TYPE_MERCHANT_LOW_STOCK`): Dispatched when inventory item balance falls below reorder level. Idempotent per item location and date.
+   - **Booking Reminder** (`TYPE_MERCHANT_BOOKING_REMINDER`): Dispatched to merchant for upcoming reservations today. Scheduled hourly via `whatsapp:booking-reminders`.
+   - **Payment Settlement Status** (`TYPE_MERCHANT_SETTLEMENT`): Dispatched upon payment reconciliation or gateway settlement completion.
+   - **Anomaly Alert** (`TYPE_MERCHANT_ANOMALY`): Dispatched upon shift closing cash variances or suspicious operational activities.
+   - **Merchant Notification Preferences**: Stored in `tenants.settings.whatsapp_notifications` with granular toggles (`daily_sales_summary`, `low_stock`, `booking_reminder`, `payment_settlement`, `anomaly_alert`). Merchant can disable specific categories without affecting transactional customer messaging.
+
+2. **Customer-Side Engagement**:
+   - **Order Confirmation** (`TYPE_ORDER_CONFIRMATION`): Real-time confirmation for accepted table and QR orders.
+   - **Booking Confirmation & Reminder** (`TYPE_BOOKING_CONFIRMATION`, `TYPE_BOOKING_REMINDER`): Positive opt-in reservation confirmations and day-of reminders.
+   - **Digital Receipt** (`TYPE_TRANSACTIONAL_RECEIPT`): Authoritative POS receipt notification upon payment completion.
+   - **Promotions** (`TYPE_MARKETING_PROMO`): Requires strict affirmative dual consent (`whatsapp_opt_in = true` AND `marketing_opt_in = true`). If marketing opt-in is absent, delivery is rejected fail-closed with `MARKETING_OPT_IN_REQUIRED`. Customers can opt out at any time via keyword or settings.
+   - **Order Status Update** (`TYPE_ORDER_STATUS_UPDATE`): Dispatched upon operational order state transitions (`preparing`, `ready`, `served`).
+
+3. **Natural Language Business Query (Section 19 Safe Parser)**:
+   - Evaluated against V1 vs V2 roadmap: Full AI Business Copilot / LLMs belong to V2 (PRD Section 48).
+   - V1 implementation utilizes `WhatsAppBusinessQueryService`, a deterministic, safe, parameterized Indonesian natural language intent parser:
+     - "Omzet hari ini?" -> Mapped safely to `DashboardService::getDashboardData('today')`.
+     - "Produk paling laku minggu ini?" -> Mapped safely to `DashboardService::getDashboardData('7_days')['top_products']`.
+     - "Stok [item] cukup sampai besok?" -> Mapped safely to `InventoryItem::where('name', 'ilike', ...)` stock balances.
+     - Unrecognized queries -> Safe guidance response listing supported queries.
+   - **Strict Multi-Tenant Boundary**: Bounded to active authenticated tenant and PostgreSQL RLS session; zero raw SQL execution; cross-tenant query attempts return zero records or throw entitlement exceptions.
+
+4. **Generalized Outbox Job & Recovery**:
+   - `SendWhatsAppMessageJob`: Generic async queue job handling all Section 19 message types with execution-time consent and entitlement re-validation.
+   - `WhatsAppOutboxRecoveryService`: Extended to recover both receipt jobs and generic message jobs across all Section 19 types without duplicate transmission.
+
+---
+
+### Decision 12: Real Provider Integration Status
+
+- **Unit & Integration Verification**: Verified with `MockWhatsAppProvider` across all failure scenarios, rate limits, timeouts, idempotency, and multi-tenant isolation (82 backend tests across 10 WhatsApp test suites, 7 Flutter WhatsApp tests).
+- **Official Spec Compliance**: `MetaCloudWhatsAppProvider` written strictly to Meta WhatsApp Cloud API specifications (`v21.0` default, `v22.0` active allowlist; `v20.0` EOL excluded; `v26.0` excluded pending live certification).
 - **Production Status**: **`NOT VERIFIED (Mock verified)`** — Live Meta Cloud API credentials, official WABA registration, approved templates, and public HTTPS webhook endpoints are mandatory prerequisites for live production rollout.
 
 ---
 
 ## Consequences & Verification
 
-- **Backend Test Suite**: 500+ tests passed (3,000+ assertions).
-- **Laravel Pint**: PASSED with 0 styling violations.
-- **Flutter Analyze**: 0 issues found.
-- **Flutter Test Suite**: 139 passed.
+- **Backend WhatsApp Test Suite**: 82 passed (338 assertions across 10 test suites, 0 failures).
+- **Backend Test Suite (Total)**: 546+ tests passed.
+- **Laravel Pint**: PASSED with 0 styling violations (`{"tool":"pint","result":"passed"}`).
+- **Flutter Analyze**: 0 issues found (ran in 2.2s).
+- **Flutter Test Suite**: 141 passed (ran in 28s).
 

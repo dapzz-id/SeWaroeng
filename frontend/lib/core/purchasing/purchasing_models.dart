@@ -398,3 +398,61 @@ class PurchaseReceiptModel {
     );
   }
 }
+
+class SmartReorderRecommendationModel {
+  final String inventoryItemId;
+  final String name;
+  final String sku;
+  final String baseUnit;
+  final String locationId;
+  final String locationName;
+  final String currentAvailable;
+  final String safetyStock;
+  final String averageDailyUsage;
+  final int leadTimeDays;
+  final String recommendedOrderQuantity;
+  final String? supplierId;
+  final String? supplierName;
+  final int unitCostMinor;
+  final int estimatedTotalCostMinor;
+
+  const SmartReorderRecommendationModel({
+    required this.inventoryItemId,
+    required this.name,
+    required this.sku,
+    required this.baseUnit,
+    required this.locationId,
+    required this.locationName,
+    required this.currentAvailable,
+    required this.safetyStock,
+    required this.averageDailyUsage,
+    required this.leadTimeDays,
+    required this.recommendedOrderQuantity,
+    this.supplierId,
+    this.supplierName,
+    required this.unitCostMinor,
+    required this.estimatedTotalCostMinor,
+  });
+
+  factory SmartReorderRecommendationModel.fromJson(Map<String, dynamic> json) {
+    return SmartReorderRecommendationModel(
+      inventoryItemId: json['inventory_item_id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      sku: json['sku'] as String? ?? '',
+      baseUnit: json['base_unit'] as String? ?? 'pcs',
+      locationId: json['location_id'] as String? ?? '',
+      locationName: json['location_name'] as String? ?? '',
+      currentAvailable: json['current_available'] as String? ?? '0',
+      safetyStock: json['safety_stock'] as String? ?? '0',
+      averageDailyUsage: json['average_daily_usage'] as String? ?? '0',
+      leadTimeDays: json['lead_time_days'] as int? ?? 3,
+      recommendedOrderQuantity:
+          json['recommended_order_quantity'] as String? ?? '0',
+      supplierId: json['supplier_id'] as String?,
+      supplierName: json['supplier_name'] as String?,
+      unitCostMinor: json['unit_cost_minor'] as int? ?? 0,
+      estimatedTotalCostMinor: json['estimated_total_cost_minor'] as int? ?? 0,
+    );
+  }
+}
+

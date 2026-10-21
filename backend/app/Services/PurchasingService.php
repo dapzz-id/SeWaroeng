@@ -12,6 +12,7 @@ use App\Models\AuditLog;
 use App\Models\InventoryItem;
 use App\Models\InventoryItemLocation;
 use App\Models\InventoryLocation;
+use App\Models\InventoryMovement;
 use App\Models\PurchaseOrder;
 use App\Models\PurchaseOrderItem;
 use App\Models\PurchaseReceipt;
@@ -588,6 +589,132 @@ class PurchasingService
 
                 return $receipt->load(['items.item', 'purchaseOrder', 'destinationLocation']);
             });
+        });
+    }
+
+    /**
+     * Calculate smart reorder recommendations based on PRD Section 13 formula:
+     * (Average daily usage × lead time) + safety stock - current available
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function calculateSmartReorder(string $tenantId, ?string $locationId = null): array
+    {
+        return $this->executeForTenant($tenantId, function () use ($tenantId, $locationId) {
+            $this->ensureTenantRls($tenantId);
+
+            $locationQuery = InventoryItemLocation::where('tenant_id', $tenantId)
+                ->with(['item', 'location']);
+
+            if ($locationId) {
+                $locationQuery->where('location_id', $locationId);
+            }
+
+            $itemLocations = $locationQuery->get();
+            $recommendations = [];
+
+            // 30 days analysis window
+            $thirtyDaysAgo = now()->subDays(30);
+
+            // Group recent consumption (sale, production, waste, manual_issue, adjustment_out) by inventory_item_id
+            $recentUsages = InventoryMovement::where('tenant_id', $tenantId)
+                ->whereIn('movement_type', ['sale', 'production', 'waste', 'manual_issue', 'adjustment_out'])
+                ->where('occurred_at', '>=', $thirtyDaysAgo)
+                ->selectRaw('inventory_item_id, SUM(ABS(quantity_delta)) as total_consumed')
+                ->groupBy('inventory_item_id')
+                ->pluck('total_consumed', 'inventory_item_id')
+                ->all();
+
+            // Recent supplier and latest unit cost mapping from historical purchase orders
+            $latestPoItems = PurchaseOrderItem::where('purchase_order_items.tenant_id', $tenantId)
+                ->whereHas('purchaseOrder', function ($q) use ($tenantId) {
+                    $q->where('purchase_orders.tenant_id', $tenantId)
+                        ->whereIn('status', ['submitted', 'approved', 'partially_received', 'received']);
+                })
+                ->with('purchaseOrder')
+                ->latest()
+                ->get()
+                ->unique('inventory_item_id')
+                ->keyBy('inventory_item_id');
+
+            $suppliers = Supplier::where('tenant_id', $tenantId)
+                ->where('status', 'active')
+                ->get()
+                ->keyBy('id');
+
+            foreach ($itemLocations as $itemLoc) {
+                $item = $itemLoc->item;
+                $location = $itemLoc->location;
+
+                if (! $item || ! $location || $item->status !== 'active') {
+                    continue;
+                }
+
+                $onHand = (float) $itemLoc->on_hand;
+                $reserved = (float) $itemLoc->reserved;
+                $currentAvailable = max(0.0, $onHand - $reserved);
+                $safetyStock = (float) ($itemLoc->reorder_level ?? 0);
+
+                // Average daily usage over 30 days
+                $totalConsumed30d = (float) ($recentUsages[$item->id] ?? 0);
+                $averageDailyUsage = $totalConsumed30d > 0 ? round($totalConsumed30d / 30, 4) : 0.0;
+
+                // Lead time in days: default to 3 days if not specified
+                $leadTimeDays = 3;
+
+                // Latest PO metadata for supplier recommendation
+                $latestPoItem = $latestPoItems->get($item->id);
+                $suggestedSupplier = null;
+                $latestUnitCostMinor = 0;
+
+                if ($latestPoItem) {
+                    $latestUnitCostMinor = (int) $latestPoItem->unit_cost_minor;
+                    $supplierId = $latestPoItem->purchaseOrder?->supplier_id;
+                    if ($supplierId && isset($suppliers[$supplierId])) {
+                        $suggestedSupplier = $suppliers[$supplierId];
+                    }
+                }
+
+                if (! $suggestedSupplier && $suppliers->isNotEmpty()) {
+                    $suggestedSupplier = $suppliers->first();
+                }
+
+                // Formula: (Average daily usage × lead time) + safety stock - current available
+                $grossNeed = ($averageDailyUsage * $leadTimeDays) + $safetyStock;
+                $recommendedQuantity = max(0.0, $grossNeed - $currentAvailable);
+
+                // Item requires reorder if current available <= safety stock or if gross need exceeds available
+                $needsReorder = ($currentAvailable <= $safetyStock && $safetyStock > 0) || ($recommendedQuantity > 0 && $averageDailyUsage > 0);
+
+                // If safety stock is set and stock is below safety stock, ensure recommended quantity brings it back above safety stock
+                if ($needsReorder && $recommendedQuantity <= 0 && $currentAvailable <= $safetyStock) {
+                    $recommendedQuantity = max(1.0, $safetyStock - $currentAvailable);
+                }
+
+                $roundedRecommended = ceil($recommendedQuantity * 100) / 100;
+
+                if ($needsReorder && $roundedRecommended > 0) {
+                    $recommendations[] = [
+                        'inventory_item_id' => $item->id,
+                        'name' => $item->name,
+                        'sku' => $item->sku,
+                        'base_unit' => $item->base_unit,
+                        'location_id' => $location->id,
+                        'location_name' => $location->name,
+                        'current_available' => sprintf('%.4f', $currentAvailable),
+                        'safety_stock' => sprintf('%.4f', $safetyStock),
+                        'average_daily_usage' => sprintf('%.4f', $averageDailyUsage),
+                        'lead_time_days' => $leadTimeDays,
+                        'recommended_order_quantity' => sprintf('%.4f', $roundedRecommended),
+                        'supplier_id' => $suggestedSupplier?->id,
+                        'supplier_name' => $suggestedSupplier?->name,
+                        'unit_cost_minor' => $latestUnitCostMinor,
+                        'estimated_total_cost_minor' => (int) round($roundedRecommended * $latestUnitCostMinor),
+                    ];
+                }
+            }
+
+            return $recommendations;
         });
     }
 }

@@ -1,19 +1,46 @@
 import 'package:flutter/material.dart';
+import '../../core/ai/ai_copilot_service.dart';
 import '../../core/auth/auth_service.dart';
 import '../../core/catalog/catalog_service.dart';
+import '../../core/customer/customer_service.dart';
 import '../../core/dashboard/dashboard_models.dart';
 import '../../core/dashboard/dashboard_service.dart';
+import '../../core/employee/employee_service.dart';
+import '../../core/finance/finance_service.dart';
 import '../../core/inventory/inventory_service.dart';
+import '../../core/loyalty/loyalty_service.dart';
 import '../../core/notification/notification_service.dart';
+import '../../core/order/order_service.dart';
+import '../../core/pos/pos_service.dart';
 import '../../core/purchasing/purchasing_service.dart';
+import '../../core/recipe/recipe_service.dart';
 import '../../core/shift/shift_service.dart';
+import '../../core/subscription/subscription_service.dart';
+import '../../core/table/table_service.dart';
+import '../../core/payment/payment_reconciliation_service.dart';
+import '../../core/payment/payment_service.dart';
 import '../../core/tenant/tenant_service.dart';
+import '../../core/whatsapp/whatsapp_service.dart';
+import '../ai/ai_copilot_screen.dart';
 import '../catalog/catalog_screen.dart';
+import '../customer/customer_list_screen.dart';
+import '../employee/employee_management_screen.dart';
+import '../finance/finance_overview_screen.dart';
+import '../finance/payment_reconciliation_screen.dart';
 import '../inventory/inventory_dashboard_screen.dart';
+import '../loyalty/loyalty_overview_screen.dart';
 import '../notification/notification_list_screen.dart';
+import '../order/order_management_screen.dart';
 import '../outlet/outlet_management_screen.dart';
+import '../platform/payment_gateway_settings_screen.dart';
+import '../platform/whatsapp_settings_screen.dart';
+import '../pos/pos_screen.dart';
 import '../purchasing/purchase_order_list_screen.dart';
+import '../recipe/recipe_list_screen.dart';
 import '../shift/shift_management_screen.dart';
+import '../subscription/subscription_overview_screen.dart';
+import '../table/booking_management_screen.dart';
+import '../table/table_management_screen.dart';
 import '../tenant/business_profile_screen.dart';
 import '../tenant/tenant_selection_screen.dart';
 
@@ -26,6 +53,19 @@ class DashboardPlaceholderScreen extends StatefulWidget {
   final ShiftService? shiftService;
   final DashboardService? dashboardService;
   final NotificationService? notificationService;
+  final EmployeeService? employeeService;
+  final CustomerService? customerService;
+  final TableService? tableService;
+  final OrderService? orderService;
+  final RecipeService? recipeService;
+  final AiCopilotService? copilotService;
+  final PosService? posService;
+  final FinanceService? financeService;
+  final LoyaltyService? loyaltyService;
+  final SubscriptionService? subscriptionService;
+  final WhatsAppService? whatsAppService;
+  final PaymentGatewayService? paymentGatewayService;
+  final PaymentReconciliationService? paymentReconciliationService;
 
   const DashboardPlaceholderScreen({
     super.key,
@@ -37,6 +77,19 @@ class DashboardPlaceholderScreen extends StatefulWidget {
     this.shiftService,
     this.dashboardService,
     this.notificationService,
+    this.employeeService,
+    this.customerService,
+    this.tableService,
+    this.orderService,
+    this.recipeService,
+    this.copilotService,
+    this.posService,
+    this.financeService,
+    this.loyaltyService,
+    this.subscriptionService,
+    this.whatsAppService,
+    this.paymentGatewayService,
+    this.paymentReconciliationService,
   });
 
   @override
@@ -50,6 +103,46 @@ class _DashboardPlaceholderScreenState
   late final NotificationService _notificationService;
   String _selectedPeriod = 'today';
   String? _selectedOutletId;
+
+  EmployeeService get _employeeService =>
+      widget.employeeService ??
+      EmployeeService(apiClient: widget.tenantService.apiClient);
+  CustomerService get _customerService =>
+      widget.customerService ??
+      CustomerService(apiClient: widget.tenantService.apiClient);
+  TableService get _tableService =>
+      widget.tableService ??
+      TableService(apiClient: widget.tenantService.apiClient);
+  OrderService get _orderService =>
+      widget.orderService ??
+      OrderService(apiClient: widget.tenantService.apiClient);
+  RecipeService get _recipeService =>
+      widget.recipeService ??
+      RecipeService(apiClient: widget.tenantService.apiClient);
+  AiCopilotService get _copilotService =>
+      widget.copilotService ??
+      AiCopilotService(apiClient: widget.tenantService.apiClient);
+  PosService get _posService =>
+      widget.posService ??
+      PosService(apiClient: widget.tenantService.apiClient);
+  FinanceService get _financeService =>
+      widget.financeService ??
+      FinanceService(apiClient: widget.tenantService.apiClient);
+  LoyaltyService get _loyaltyService =>
+      widget.loyaltyService ??
+      LoyaltyService(apiClient: widget.tenantService.apiClient);
+  SubscriptionService get _subscriptionService =>
+      widget.subscriptionService ??
+      SubscriptionService(apiClient: widget.tenantService.apiClient);
+  WhatsAppService get _whatsAppService =>
+      widget.whatsAppService ??
+      WhatsAppService(apiClient: widget.tenantService.apiClient);
+  PaymentGatewayService get _paymentGatewayService =>
+      widget.paymentGatewayService ??
+      PaymentGatewayService(apiClient: widget.tenantService.apiClient);
+  PaymentReconciliationService get _paymentReconciliationService =>
+      widget.paymentReconciliationService ??
+      PaymentReconciliationService(apiClient: widget.tenantService.apiClient);
 
   @override
   void initState() {
@@ -114,6 +207,14 @@ class _DashboardPlaceholderScreenState
 
         return Scaffold(
           backgroundColor: const Color(0xFF0F172A),
+          drawer: _buildAppDrawer(
+            context,
+            activeTenant,
+            activeOutlet,
+            user,
+            role,
+            isCashier,
+          ),
           appBar: AppBar(
             title: const Text(
               'SeWaroeng Dashboard',
@@ -232,7 +333,11 @@ class _DashboardPlaceholderScreenState
                           ),
                         ),
                         const SizedBox(height: 12),
-                        _buildQuickActionButtons(),
+                        _buildQuickActionButtons(
+                          activeOutlet: activeOutlet,
+                          role: role,
+                          isCashier: isCashier,
+                        ),
                       ],
                     ),
                   ),
@@ -1098,10 +1203,47 @@ class _DashboardPlaceholderScreenState
     );
   }
 
-  Widget _buildQuickActionButtons() {
+  Widget _buildQuickActionButtons({
+    dynamic activeOutlet,
+    String role = 'owner',
+    bool isCashier = false,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // Primary POS Action
+        ElevatedButton.icon(
+          key: const Key('dashboard_pos_button'),
+          icon: const Icon(Icons.point_of_sale, size: 22),
+          label: const Text(
+            'Buka Kasir POS',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF10B981),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 18),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          onPressed: () {
+            final outletId = activeOutlet?.id ?? 'default';
+            final outletName = activeOutlet?.name ?? 'Outlet Utama';
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => PosScreen(
+                  posService: _posService,
+                  customerService: _customerService,
+                  outletId: outletId,
+                  outletName: outletName,
+                ),
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+
         // Catalog Quick Action
         ElevatedButton.icon(
           key: const Key('dashboard_catalog_button'),
@@ -1201,7 +1343,7 @@ class _DashboardPlaceholderScreenState
         // Shift & Cash Drawer Management Quick Action
         ElevatedButton.icon(
           key: const Key('dashboard_shift_management_button'),
-          icon: const Icon(Icons.point_of_sale, size: 20),
+          icon: const Icon(Icons.schedule, size: 20),
           label: const Text(
             'Manajemen Shift & Laci Kasir',
             style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
@@ -1228,6 +1370,247 @@ class _DashboardPlaceholderScreenState
           },
         ),
         const SizedBox(height: 12),
+
+        // Row: Orders & Tables
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                key: const Key('dashboard_orders_button'),
+                icon: const Icon(Icons.receipt_long, size: 18),
+                label: const Text('Pesanan Online & QR'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E293B),
+                  foregroundColor: const Color(0xFFF59E0B),
+                  side: const BorderSide(color: Color(0xFF334155)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => OrderManagementScreen(
+                        orderService: _orderService,
+                        tenantService: widget.tenantService,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton.icon(
+                key: const Key('dashboard_tables_button'),
+                icon: const Icon(Icons.table_restaurant, size: 18),
+                label: const Text('Meja & Dine-In'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E293B),
+                  foregroundColor: const Color(0xFF06B6D4),
+                  side: const BorderSide(color: Color(0xFF334155)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => TableManagementScreen(
+                        tableService: _tableService,
+                        tenantService: widget.tenantService,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        // Row: Bookings & Recipes
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                key: const Key('dashboard_bookings_button'),
+                icon: const Icon(Icons.bookmark_border, size: 18),
+                label: const Text('Reservasi Meja'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E293B),
+                  foregroundColor: const Color(0xFF8B5CF6),
+                  side: const BorderSide(color: Color(0xFF334155)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => BookingManagementScreen(
+                        tableService: _tableService,
+                        tenantService: widget.tenantService,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton.icon(
+                key: const Key('dashboard_recipes_button'),
+                icon: const Icon(Icons.restaurant_menu, size: 18),
+                label: const Text('Resep & HPP BOM'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E293B),
+                  foregroundColor: const Color(0xFFD97706),
+                  side: const BorderSide(color: Color(0xFF334155)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => RecipeListScreen(
+                        recipeService: _recipeService,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        // Row: Customers & AI Copilot
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                key: const Key('dashboard_customers_button'),
+                icon: const Icon(Icons.people_alt_outlined, size: 18),
+                label: const Text('Pelanggan CRM 360'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E293B),
+                  foregroundColor: const Color(0xFF0D9488),
+                  side: const BorderSide(color: Color(0xFF334155)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => CustomerListScreen(
+                        customerService: _customerService,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton.icon(
+                key: const Key('dashboard_ai_copilot_button'),
+                icon: const Icon(Icons.auto_awesome, size: 18),
+                label: const Text('AI Copilot'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E293B),
+                  foregroundColor: const Color(0xFFA855F7),
+                  side: const BorderSide(color: Color(0xFF334155)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => AiCopilotScreen(
+                        copilotService: _copilotService,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        // If not cashier, Row: Employee & Finance
+        if (!isCashier) ...[
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  key: const Key('dashboard_employees_button'),
+                  icon: const Icon(Icons.badge_outlined, size: 18),
+                  label: const Text('Karyawan & Staf'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1E293B),
+                    foregroundColor: const Color(0xFF38BDF8),
+                    side: const BorderSide(color: Color(0xFF334155)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => EmployeeManagementScreen(
+                          employeeService: _employeeService,
+                          tenantService: widget.tenantService,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton.icon(
+                  key: const Key('dashboard_finance_button'),
+                  icon: const Icon(Icons.account_balance_wallet, size: 18),
+                  label: const Text('Laporan Keuangan'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1E293B),
+                    foregroundColor: const Color(0xFFEAB308),
+                    side: const BorderSide(color: Color(0xFF334155)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => FinanceOverviewScreen(
+                          financeService: _financeService,
+                          reconciliationService: _paymentReconciliationService,
+                          userRole: role,
+                          outletId: activeOutlet?.id,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+        ],
 
         // Business & Outlet Management Shortcuts
         Row(
@@ -1288,4 +1671,521 @@ class _DashboardPlaceholderScreenState
       ],
     );
   }
+
+  Widget _buildAppDrawer(
+    BuildContext context,
+    dynamic activeTenant,
+    dynamic activeOutlet,
+    dynamic user,
+    String role,
+    bool isCashier,
+  ) {
+    return Drawer(
+      backgroundColor: const Color(0xFF0F172A),
+      child: SafeArea(
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            // Drawer Header
+            Container(
+              padding: const EdgeInsets.all(20),
+              color: const Color(0xFF1E293B),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const CircleAvatar(
+                        backgroundColor: Color(0xFF0284C7),
+                        radius: 20,
+                        child: Icon(Icons.store, color: Colors.white, size: 22),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              activeTenant?.name ?? 'SeWaroeng',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              activeOutlet?.name ?? 'Belum ada outlet',
+                              style: const TextStyle(
+                                color: Color(0xFF94A3B8),
+                                fontSize: 12,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0284C7).withAlpha(50),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF0284C7)),
+                    ),
+                    child: Text(
+                      'PERAN: ${role.toUpperCase()}',
+                      style: const TextStyle(
+                        color: Color(0xFF38BDF8),
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            // Section 1: Operasional
+            _buildDrawerSectionHeader('OPERASIONAL & KASIR'),
+            _buildDrawerTile(
+              key: const Key('drawer_pos_button'),
+              icon: Icons.point_of_sale,
+              title: 'Kasir POS',
+              color: const Color(0xFF10B981),
+              onTap: () {
+                Navigator.pop(context);
+                final outletId = activeOutlet?.id ?? 'default';
+                final outletName = activeOutlet?.name ?? 'Outlet Utama';
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PosScreen(
+                      posService: _posService,
+                      customerService: _customerService,
+                      outletId: outletId,
+                      outletName: outletName,
+                    ),
+                  ),
+                );
+              },
+            ),
+            _buildDrawerTile(
+              key: const Key('drawer_orders_button'),
+              icon: Icons.receipt_long,
+              title: 'Pesanan & QR Meja',
+              color: const Color(0xFFF59E0B),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => OrderManagementScreen(
+                      orderService: _orderService,
+                      tenantService: widget.tenantService,
+                    ),
+                  ),
+                );
+              },
+            ),
+            _buildDrawerTile(
+              key: const Key('drawer_tables_button'),
+              icon: Icons.table_restaurant,
+              title: 'Manajemen Meja',
+              color: const Color(0xFF06B6D4),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => TableManagementScreen(
+                      tableService: _tableService,
+                      tenantService: widget.tenantService,
+                    ),
+                  ),
+                );
+              },
+            ),
+            _buildDrawerTile(
+              key: const Key('drawer_bookings_button'),
+              icon: Icons.bookmark_border,
+              title: 'Reservasi & Booking',
+              color: const Color(0xFF8B5CF6),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => BookingManagementScreen(
+                      tableService: _tableService,
+                      tenantService: widget.tenantService,
+                    ),
+                  ),
+                );
+              },
+            ),
+            _buildDrawerTile(
+              key: const Key('drawer_shifts_button'),
+              icon: Icons.schedule,
+              title: 'Shift & Laci Kasir',
+              color: const Color(0xFF047857),
+              onTap: () {
+                Navigator.pop(context);
+                final sft = widget.shiftService ??
+                    ShiftService(apiClient: widget.tenantService.apiClient);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ShiftManagementScreen(
+                      shiftService: sft,
+                      tenantService: widget.tenantService,
+                    ),
+                  ),
+                );
+              },
+            ),
+
+            const Divider(color: Color(0xFF334155)),
+
+            // Section 2: Produk & Persediaan
+            _buildDrawerSectionHeader('PRODUK & PERSEDIAAN'),
+            _buildDrawerTile(
+              key: const Key('drawer_catalog_button'),
+              icon: Icons.inventory_2,
+              title: 'Katalog Produk & Menu',
+              color: const Color(0xFF0F766E),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => CatalogScreen(
+                      catalogService: widget.catalogService ??
+                          CatalogService(
+                            apiClient: widget.tenantService.apiClient,
+                          ),
+                      tenantService: widget.tenantService,
+                    ),
+                  ),
+                );
+              },
+            ),
+            _buildDrawerTile(
+              key: const Key('drawer_recipes_button'),
+              icon: Icons.restaurant_menu,
+              title: 'Resep, BOM & HPP',
+              color: const Color(0xFFD97706),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => RecipeListScreen(
+                      recipeService: _recipeService,
+                    ),
+                  ),
+                );
+              },
+            ),
+            _buildDrawerTile(
+              key: const Key('drawer_inventory_button'),
+              icon: Icons.shelves,
+              title: 'Inventaris & Stok',
+              color: const Color(0xFF4338CA),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => InventoryDashboardScreen(
+                      inventoryService: widget.inventoryService ??
+                          InventoryService(
+                            apiClient: widget.tenantService.apiClient,
+                          ),
+                    ),
+                  ),
+                );
+              },
+            ),
+            _buildDrawerTile(
+              key: const Key('drawer_purchasing_button'),
+              icon: Icons.shopping_bag,
+              title: 'Pengadaan / PO Supplier',
+              color: const Color(0xFF0369A1),
+              onTap: () {
+                Navigator.pop(context);
+                final inv = widget.inventoryService ??
+                    InventoryService(apiClient: widget.tenantService.apiClient);
+                final pur = widget.purchasingService ??
+                    PurchasingService(apiClient: widget.tenantService.apiClient);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PurchaseOrderListScreen(
+                      purchasingService: pur,
+                      inventoryService: inv,
+                    ),
+                  ),
+                );
+              },
+            ),
+
+            const Divider(color: Color(0xFF334155)),
+
+            // Section 3: Pelanggan & CRM
+            _buildDrawerSectionHeader('PELANGGAN & CRM'),
+            _buildDrawerTile(
+              key: const Key('drawer_customers_button'),
+              icon: Icons.people_alt_outlined,
+              title: 'Customer CRM & 360',
+              color: const Color(0xFF0D9488),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => CustomerListScreen(
+                      customerService: _customerService,
+                    ),
+                  ),
+                );
+              },
+            ),
+            _buildDrawerTile(
+              key: const Key('drawer_loyalty_button'),
+              icon: Icons.card_giftcard,
+              title: 'Program Loyalitas & Poin',
+              color: const Color(0xFFEC4899),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => LoyaltyOverviewScreen(
+                      loyaltyService: _loyaltyService,
+                    ),
+                  ),
+                );
+              },
+            ),
+
+            const Divider(color: Color(0xFF334155)),
+
+            // Section 4: Bisnis, Keuangan & AI
+            _buildDrawerSectionHeader('BISNIS & KEUANGAN'),
+            if (!isCashier) ...[
+              _buildDrawerTile(
+                key: const Key('drawer_finance_button'),
+                icon: Icons.account_balance_wallet,
+                title: 'Laporan Keuangan',
+                color: const Color(0xFFEAB308),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => FinanceOverviewScreen(
+                        financeService: _financeService,
+                        reconciliationService: _paymentReconciliationService,
+                        userRole: role,
+                        outletId: activeOutlet?.id,
+                      ),
+                    ),
+                  );
+                },
+              ),
+              _buildDrawerTile(
+                key: const Key('drawer_payment_reconciliation_button'),
+                icon: Icons.compare_arrows,
+                title: 'Rekonsiliasi Pembayaran',
+                color: const Color(0xFF10B981),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => PaymentReconciliationScreen(
+                        reconciliationService: _paymentReconciliationService,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
+            _buildDrawerTile(
+              key: const Key('drawer_ai_copilot_button'),
+              icon: Icons.auto_awesome,
+              title: 'AI Business Copilot',
+              color: const Color(0xFFA855F7),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AiCopilotScreen(
+                      copilotService: _copilotService,
+                    ),
+                  ),
+                );
+              },
+            ),
+
+            const Divider(color: Color(0xFF334155)),
+
+            // Section 5: Pengaturan & Outlet
+            _buildDrawerSectionHeader('PENGATURAN'),
+            if (!isCashier) ...[
+              _buildDrawerTile(
+                key: const Key('drawer_employees_button'),
+                icon: Icons.badge_outlined,
+                title: 'Karyawan & Staf',
+                color: const Color(0xFF38BDF8),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => EmployeeManagementScreen(
+                        employeeService: _employeeService,
+                        tenantService: widget.tenantService,
+                      ),
+                    ),
+                  );
+                },
+              ),
+              _buildDrawerTile(
+                key: const Key('drawer_outlets_button'),
+                icon: Icons.storefront,
+                title: 'Kelola Outlet',
+                color: const Color(0xFF38BDF8),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => OutletManagementScreen(
+                        tenantService: widget.tenantService,
+                      ),
+                    ),
+                  );
+                },
+              ),
+              _buildDrawerTile(
+                key: const Key('drawer_business_profile_button'),
+                icon: Icons.settings,
+                title: 'Profil Bisnis',
+                color: const Color(0xFF38BDF8),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => BusinessProfileScreen(
+                        tenantService: widget.tenantService,
+                      ),
+                    ),
+                  );
+                },
+              ),
+              _buildDrawerTile(
+                key: const Key('drawer_whatsapp_settings_button'),
+                icon: Icons.chat_outlined,
+                title: 'Integrasi WhatsApp',
+                color: const Color(0xFF25D366),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => WhatsAppSettingsScreen(
+                        whatsAppService: _whatsAppService,
+                      ),
+                    ),
+                  );
+                },
+              ),
+              _buildDrawerTile(
+                key: const Key('drawer_payment_gateway_button'),
+                icon: Icons.account_balance,
+                title: 'Gateway Pembayaran (Admin)',
+                color: const Color(0xFF6366F1),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => PaymentGatewaySettingsScreen(
+                        paymentService: _paymentGatewayService,
+                        initialTenantId: activeTenant?.id,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
+            _buildDrawerTile(
+              key: const Key('drawer_subscription_button'),
+              icon: Icons.verified_user_outlined,
+              title: 'Langganan & Kuota',
+              color: const Color(0xFF38BDF8),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SubscriptionOverviewScreen(
+                      subscriptionService: _subscriptionService,
+                    ),
+                  ),
+                );
+              },
+            ),
+
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDrawerSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Text(
+        title,
+        style: const TextStyle(
+          color: Color(0xFF64748B),
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 1.1,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDrawerTile({
+    required Key key,
+    required IconData icon,
+    required String title,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return ListTile(
+      key: key,
+      leading: Icon(icon, color: color, size: 22),
+      title: Text(
+        title,
+        style: const TextStyle(color: Colors.white, fontSize: 14),
+      ),
+      dense: true,
+      onTap: onTap,
+    );
+  }
 }
+

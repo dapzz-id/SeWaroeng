@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frontend/core/api/api_client.dart';
+import 'package:frontend/core/whatsapp/whatsapp_models.dart';
 import 'package:frontend/core/whatsapp/whatsapp_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -213,6 +214,93 @@ void main() {
       final resendOk = await service.resendMessage('msg-1');
       expect(resendOk, isTrue);
       expect(resendCalled, isTrue);
+    });
+
+    test('fetchPreferences and savePreferences work properly', () async {
+      bool saveCalled = false;
+
+      final mockClient = MockClient((request) async {
+        if (request.url.path == '/api/v1/whatsapp/preferences' && request.method == 'GET') {
+          return http.Response(
+            jsonEncode({
+              'data': {
+                'merchant_phone': '08123456789',
+                'daily_sales_summary': true,
+                'low_stock': true,
+                'booking_reminder': true,
+                'payment_settlement': true,
+                'anomaly_alert': true,
+              },
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/api/v1/whatsapp/preferences' && request.method == 'POST') {
+          saveCalled = true;
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(body['daily_sales_summary'], isFalse);
+          return http.Response(
+            jsonEncode({
+              'message': 'Preferences saved',
+              'data': body,
+            }),
+            200,
+          );
+        }
+        return http.Response('Not Found', 404);
+      });
+
+      final apiClient = ApiClient(baseUrl: 'http://localhost:8000', httpClient: mockClient);
+      final service = WhatsAppService(apiClient: apiClient);
+
+      await service.fetchPreferences();
+      expect(service.preferences, isNotNull);
+      expect(service.preferences!.merchantPhone, equals('08123456789'));
+      expect(service.preferences!.dailySalesSummary, isTrue);
+
+      final saveOk = await service.savePreferences(
+        const WhatsAppPreferencesModel(
+          merchantPhone: '08123456789',
+          dailySalesSummary: false,
+          lowStock: true,
+          bookingReminder: true,
+          paymentSettlement: true,
+          anomalyAlert: true,
+        ),
+      );
+      expect(saveOk, isTrue);
+      expect(saveCalled, isTrue);
+      expect(service.preferences!.dailySalesSummary, isFalse);
+    });
+
+    test('executeBusinessQuery handles natural language query successfully', () async {
+      final mockClient = MockClient((request) async {
+        if (request.url.path == '/api/v1/whatsapp/query' && request.method == 'POST') {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(body['query'], equals('Omzet hari ini?'));
+          return http.Response(
+            jsonEncode({
+              'data': {
+                'intent': 'daily_sales',
+                'success': true,
+                'reply_text': 'Total Omzet: Rp 1.500.000',
+                'data': {'net_sales_minor': 150000000},
+              },
+            }),
+            200,
+          );
+        }
+        return http.Response('Not Found', 404);
+      });
+
+      final apiClient = ApiClient(baseUrl: 'http://localhost:8000', httpClient: mockClient);
+      final service = WhatsAppService(apiClient: apiClient);
+
+      final res = await service.executeBusinessQuery('Omzet hari ini?');
+      expect(res, isNotNull);
+      expect(res!.intent, equals('daily_sales'));
+      expect(res.success, isTrue);
+      expect(res.replyText, contains('Total Omzet: Rp 1.500.000'));
     });
   });
 }

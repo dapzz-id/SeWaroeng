@@ -9,3 +9,7 @@ Thumbs.db
 # Environment files
 *.env
 !.env.example
+
+# Redis
+dump.rdb
+*.rdb

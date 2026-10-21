@@ -40,7 +40,9 @@ sewarong/
 │   └── test/
 │       └── core/                # DeviceService & OutboxService unit tests
 ├── scripts/
-│   └── setup-db.sql             # Reproducible PostgreSQL role & database setup script
+│   ├── setup-db-staging.sql     # Isolated PostgreSQL staging setup script
+│   ├── setup-db-dev.sql         # Local dev and test PostgreSQL setup script
+│   └── setup-db-production.sql  # Inactive production PostgreSQL setup template
 └── docs/
     ├── SeWaroeng_PRD_v1.0.md
     ├── architecture-security-checklist.md
@@ -1639,10 +1641,16 @@ Customer Delivery Status (Auditable Notification Log)
 - $\text{WhatsApp failure} \ne \text{Finance failure}$
 A provider timeout, rate limit, authentication refusal, or transient outage **never** rolls back or aborts a committed sale, payment settlement, inventory reduction, or financial journal entry. Critical POS and payment requests never wait for provider HTTP responses.
 
-### 27.2 Asynchronous Delivery & Commit Boundary (`SendWhatsAppReceiptJob`)
+### 27.2 Asynchronous Delivery, Commit Boundary & Durable Outbox Recovery (`WhatsAppOutboxRecoveryService`)
 - **After-Commit Delivery**: Event listeners create a durable pending outbox record (`WhatsAppMessage` with status `pending`) and dispatch `SendWhatsAppReceiptJob` configured with `$this->afterCommit = true`.
 - **Database Transaction Protection**: If a database transaction rolls back prior to commit, the after-commit queue job is completely discarded by Laravel's `DatabaseTransactionsManager`, guaranteeing zero phantom message dispatches.
 - **Durable Dispatch & Enqueue Fault Isolation**: If queue broker connection fails during enqueue (e.g. Redis/database queue broker outage), the exception is safely caught without failing POS or payment settlement. The outbox record captures `status = failed`, `error_code = 'ENQUEUE_FAILED'`, and is logged with full observability for re-processing.
+- **Durable Outbox Recovery Mechanism**: An independent scheduled recovery dispatcher (`App\Services\WhatsApp\WhatsAppOutboxRecoveryService`, command `whatsapp:outbox-recover`) runs on a recurring schedule (every 5 minutes via `routes/console.php` with `withoutOverlapping()`).
+  - **Recovery Scope**: Detects stranded records (`status = 'pending'` older than 2 minutes where job dispatch was dropped or application process crashed), failed enqueue records (`status = 'failed'`, `error_code = 'ENQUEUE_FAILED'`), and worker crash in-flight messages (`status = 'sending'`, `last_attempt_at` older than 15 minutes without `provider_message_id`).
+  - **Atomic Concurrency & Idempotency**: Atomic state transition (`status = 'sending'`, `attempts = attempts + 1`, guarded by `attempts < 3`) prevents double-dispatch if concurrent workers execute.
+  - **Terminal State Invariant**: Terminal statuses (`sent`, `delivered`, `read`) are strictly never retransmitted.
+  - **Consent Re-Verification**: Re-evaluates customer consent at recovery time; if recipient opted out after initial persistence, dispatch is safely aborted with `CUSTOMER_OPTED_OUT` without contacting provider.
+  - **Domain Zero-Mutation Guarantee**: Outbox recovery strictly operates on notification ledger records; it **never** mutates POS Sales, Payments, double-entry journals, or stock ledgers.
 - **Queue Driver & Worker Requirements**: In production, `QUEUE_CONNECTION` must be set to a durable driver (`database` or `redis`) with active queue workers (`php artisan queue:work --queue=default`). `QUEUE_CONNECTION=sync` does not satisfy production asynchronous isolation.
 - **Bounded Retries & Timeout**: Bounded retries (`$tries = 3`, `$backoff = [5, 15, 45]`) and timeouts (`$timeout = 30s`) prevent worker thread hangs.
 
@@ -1654,11 +1662,13 @@ The core CRM, POS, and Notification subsystems are decoupled from third-party ve
 - `MetaCloudWhatsAppProvider`: Official Meta WhatsApp Cloud API client with template parameters, text messages, Bearer authentication, and error classification.
 
 ### 27.4 Graph API Version Policy & Approved Template Contracts
-- **Server-Side Version Configuration**: Version is configurable via `config('services.whatsapp.meta.graph_version')` or connection configuration. Magic strings are prohibited.
-  - `v20.0`: Released June 11, 2024 — Supported until June 2026.
-  - `v21.0`: Released October 8, 2024 — Supported until October 2026 (Production Default).
-  - `v22.0`: Released February 11, 2025 — Supported until February 2027.
-  - Expired versions (e.g., `v18.0`, `v19.0`) or unvalidated strings are strictly rejected on connection update and configuration load with `\InvalidArgumentException` / HTTP 422.
+- **Server-Side Version Configuration & Official Lifecycle**:
+  - Verification Audit Date: October 10, 2026 (acuan: Meta Graph API Changelog & WhatsApp Business Platform docs).
+  - `v20.0`: Released May 21, 2024 — **EXPIRED** September 24, 2026. Whitelist support completely removed; requests specifying `v20.0` are rejected immediately.
+  - `v21.0`: Released October 2, 2024 — Active until January 21, 2027 (Production Default).
+  - `v22.0`: Released January 21, 2025 — Active until May 20, 2027 (Active Supported).
+  - `v26.0` (Released July 29, 2026) and intermediate versions (`v23.0`-`v25.0`): Evaluated during audit. Meta introduces breaking architectural changes in newer versions (e.g. Commerce Order Management API deprecation, ad targeting constraints). Newer versions are NOT assumed automatically compatible for WhatsApp Cloud API message contracts without live certified testing and are excluded from the allowlist.
+  - Expired versions or unvalidated strings are strictly rejected on connection update and configuration load with `\InvalidArgumentException` / HTTP 422 with zero silent fallback.
 - **Approved Template Semantics**: Templates configured on connections are validated prior to dispatch. If a template is marked `REJECTED`, dispatch fails immediately with `TEMPLATE_REJECTED` without executing wasteful network requests.
 - **Ambiguous Timeout Classification**: Network timeouts or broken sockets are classified as `AMBIGUOUS_TIMEOUT` and marked retryable, preserving idempotency without assuming definitive delivery failure.
 

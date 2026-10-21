@@ -1,9 +1,6 @@
-import 'dart:io';
 import 'package:drift/drift.dart';
-import 'package:drift/native.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as p;
 
+import 'connection/connection.dart' as impl;
 import 'database_encryption.dart';
 
 part 'database.g.dart';
@@ -315,18 +312,7 @@ class AppDatabase extends _$AppDatabase {
         },
       );
 
-  static LazyDatabase _openConnection([DatabaseEncryptionKeyManager? keyManager]) {
-    return LazyDatabase(() async {
-      final dbFolder = await getApplicationDocumentsDirectory();
-      final file = File(p.join(dbFolder.path, 'sewaroeng_local.sqlite'));
-      final km = keyManager ?? DatabaseEncryptionKeyManager();
-      final encryptionKey = await km.getOrCreateDatabaseKey();
-      return NativeDatabase.createInBackground(
-        file,
-        setup: (rawDb) {
-          DatabaseEncryptionKeyManager.applyEncryptionPragma(rawDb, encryptionKey);
-        },
-      );
-    });
+  static QueryExecutor _openConnection([DatabaseEncryptionKeyManager? keyManager]) {
+    return impl.openConnection(keyManager);
   }
 }

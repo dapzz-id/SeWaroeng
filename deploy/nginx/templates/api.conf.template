@@ -1,0 +1,133 @@
+# ==============================================================================
+# SeWaroeng — API Nginx Virtual Host Template
+# Target: Ubuntu 22.04+ LTS / Debian 12+, PHP 8.4-FPM
+# Variables: ${API_HOST}, ${APP_ROOT}, ${PHP_SOCKET}
+# ==============================================================================
+
+# HTTP — Phase 1 Bootstrap & ACME Challenge
+# Serves port 80 for Let's Encrypt HTTP-01 challenge and liveness probe prior to TLS issuance.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${API_HOST};
+
+    # Root for ACME / Let's Encrypt webroot verification & Laravel entrypoint
+    root ${APP_ROOT}/backend/public;
+    index index.php;
+
+    # Security: Deny direct access to hidden files (.env, .git, etc.)
+    location ~ /\.(?!well-known).* {
+        deny all;
+        access_log off;
+        log_not_found off;
+    }
+
+    # Let's Encrypt HTTP-01 Challenge Pass-through
+    location ^~ /.well-known/acme-challenge/ {
+        allow all;
+        root ${APP_ROOT}/backend/public;
+    }
+
+    # API Routing & Proxy to PHP-FPM
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    # Health & Liveness probes (Unauthenticated, fast response)
+    location = /up {
+        try_files $uri /index.php?$query_string;
+        access_log off;
+    }
+
+    location = /api/v1/health {
+        try_files $uri /index.php?$query_string;
+    }
+
+    # PHP-FPM execution
+    location ~ \.php$ {
+        include fastcgi_params;
+        fastcgi_pass ${PHP_SOCKET};
+        fastcgi_index index.php;
+        fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+        fastcgi_param DOCUMENT_ROOT $realpath_root;
+
+        # Webhook payload & signature preservation
+        fastcgi_pass_request_headers on;
+        fastcgi_buffers 16 16k;
+        fastcgi_buffer_size 32k;
+        fastcgi_read_timeout 60s;
+        fastcgi_connect_timeout 10s;
+    }
+
+    # Request size limits (supports receipts, avatar uploads, and batch imports)
+    client_max_body_size 16M;
+
+    # Logging
+    access_log /var/log/nginx/${API_HOST}_access.log;
+    error_log /var/log/nginx/${API_HOST}_error.log warn;
+}
+
+# ------------------------------------------------------------------------------
+# HTTPS — TLS Server Block Template (Phase 3 Activation)
+# Note: Keep commented out during initial HTTP bootstrap until certificates are
+# issued on disk via Certbot:
+#   certbot certonly --webroot -w ${APP_ROOT}/backend/public -d ${API_HOST}
+# ------------------------------------------------------------------------------
+# server {
+#     listen 443 ssl http2;
+#     listen [::]:443 ssl http2;
+#     server_name ${API_HOST};
+#
+#     root ${APP_ROOT}/backend/public;
+#     index index.php;
+#
+#     ssl_certificate /etc/letsencrypt/live/${API_HOST}/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/${API_HOST}/privkey.pem;
+#     ssl_protocols TLSv1.2 TLSv1.3;
+#     ssl_ciphers HIGH:!aNULL:!MD5;
+#     ssl_prefer_server_ciphers on;
+#     ssl_session_cache shared:SSL:10m;
+#     ssl_session_timeout 1d;
+#
+#     # Security headers
+#     add_header X-Frame-Options "DENY" always;
+#     add_header X-Content-Type-Options "nosniff" always;
+#     add_header X-XSS-Protection "1; mode=block" always;
+#     add_header Referrer-Policy "no-referrer-when-downgrade" always;
+#
+#     location ~ /\.(?!well-known).* {
+#         deny all;
+#         access_log off;
+#         log_not_found off;
+#     }
+#
+#     location / {
+#         try_files $uri $uri/ /index.php?$query_string;
+#     }
+#
+#     location = /up {
+#         try_files $uri /index.php?$query_string;
+#         access_log off;
+#     }
+#
+#     location = /api/v1/health {
+#         try_files $uri /index.php?$query_string;
+#     }
+#
+#     location ~ \.php$ {
+#         include fastcgi_params;
+#         fastcgi_pass ${PHP_SOCKET};
+#         fastcgi_index index.php;
+#         fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+#         fastcgi_param DOCUMENT_ROOT $realpath_root;
+#         fastcgi_pass_request_headers on;
+#         fastcgi_buffers 16 16k;
+#         fastcgi_buffer_size 32k;
+#         fastcgi_read_timeout 60s;
+#         fastcgi_connect_timeout 10s;
+#     }
+#
+#     client_max_body_size 16M;
+#     access_log /var/log/nginx/${API_HOST}_ssl_access.log;
+#     error_log /var/log/nginx/${API_HOST}_ssl_error.log warn;
+# }

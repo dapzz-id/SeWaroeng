@@ -3,20 +3,39 @@
 namespace App\Services\WhatsApp\Providers;
 
 use App\Models\TenantWhatsAppConnection;
+use App\Models\WhatsAppMessage;
 use App\Services\WhatsApp\Contracts\WhatsAppProviderInterface;
 use App\Services\WhatsApp\DTO\WhatsAppMessagePayload;
 use App\Services\WhatsApp\DTO\WhatsAppSendResult;
 use App\Services\WhatsApp\DTO\WhatsAppWebhookEvent;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class MetaCloudWhatsAppProvider implements WhatsAppProviderInterface
 {
-    public const DEFAULT_API_VERSION = 'v21.0';
+    /**
+     * Default candidate Graph API version evaluated and contract-tested.
+     */
+    public const DEFAULT_API_VERSION = 'v25.0';
 
-    public const SUPPORTED_API_VERSIONS = ['v20.0', 'v21.0', 'v22.0'];
+    /**
+     * Active supported versions tested against SeWaroeng contract suite.
+     */
+    public const SUPPORTED_API_VERSIONS = ['v21.0', 'v22.0', 'v25.0'];
+
+    /**
+     * Upstream released by Meta, but not yet verified or allowlisted in SeWaroeng adapters.
+     * Note: v26.0 has been released upstream by Meta, but requires contract test staging verification before enablement.
+     */
+    public const UPSTREAM_RELEASED_VERSIONS = ['v26.0'];
+
+    /**
+     * Deprecated and expired Graph API versions (rejected without network call).
+     */
+    public const EXPIRED_API_VERSIONS = ['v20.0', 'v19.0', 'v18.0', 'v17.0', 'v16.0'];
 
     public function getProviderName(): string
     {
@@ -58,15 +77,118 @@ class MetaCloudWhatsAppProvider implements WhatsAppProviderInterface
         $apiVersion = $this->resolveApiVersion($connection);
         $url = "https://graph.facebook.com/{$apiVersion}/{$phoneNumberId}/messages";
 
-        // Template approval status contract validation
+        // Fail-Closed Template & Customer Service Window Contract Validation
+        $configuredLanguage = null;
         if (! empty($payload->templateName)) {
             $templatesConfig = $connection->configuration['templates'] ?? [];
-            $templateStatus = $templatesConfig[$payload->templateName]['status'] ?? 'APPROVED';
+            if (! array_key_exists($payload->templateName, $templatesConfig)) {
+                return WhatsAppSendResult::failure(
+                    errorCode: 'TEMPLATE_MISSING',
+                    errorMessage: "Template '{$payload->templateName}' is not configured on this connection.",
+                    isRetryable: false
+                );
+            }
 
-            if (strtoupper($templateStatus) === 'REJECTED') {
+            $templateDef = $templatesConfig[$payload->templateName];
+            $status = is_array($templateDef) ? ($templateDef['status'] ?? null) : $templateDef;
+            $statusUpper = strtoupper(trim((string) $status));
+            $isEnabled = is_array($templateDef) ? ($templateDef['enabled'] ?? true) : true;
+
+            if ($statusUpper === 'REJECTED') {
                 return WhatsAppSendResult::failure(
                     errorCode: 'TEMPLATE_REJECTED',
                     errorMessage: "Template '{$payload->templateName}' has been rejected by Meta and cannot be sent.",
+                    isRetryable: false
+                );
+            }
+
+            if (! $isEnabled || $statusUpper === 'DISABLED') {
+                return WhatsAppSendResult::failure(
+                    errorCode: 'TEMPLATE_DISABLED',
+                    errorMessage: "Template '{$payload->templateName}' is disabled and cannot be sent.",
+                    isRetryable: false
+                );
+            }
+
+            if ($statusUpper === 'PAUSED') {
+                return WhatsAppSendResult::failure(
+                    errorCode: 'TEMPLATE_PAUSED',
+                    errorMessage: "Template '{$payload->templateName}' is paused and cannot be sent.",
+                    isRetryable: false
+                );
+            }
+
+            if ($statusUpper === 'PENDING') {
+                return WhatsAppSendResult::failure(
+                    errorCode: 'TEMPLATE_PENDING',
+                    errorMessage: "Template '{$payload->templateName}' is pending approval and cannot be sent.",
+                    isRetryable: false
+                );
+            }
+
+            if ($statusUpper !== 'APPROVED') {
+                return WhatsAppSendResult::failure(
+                    errorCode: 'TEMPLATE_NOT_APPROVED',
+                    errorMessage: "Template '{$payload->templateName}' is in non-approved status '{$statusUpper}' and cannot be sent.",
+                    isRetryable: false
+                );
+            }
+
+            // Language validation if configured on template definition
+            $configuredLanguage = is_array($templateDef) ? ($templateDef['language'] ?? null) : null;
+            if ($configuredLanguage !== null && ($payload->metadata['language_code'] ?? null) !== null) {
+                if ($payload->metadata['language_code'] !== $configuredLanguage) {
+                    return WhatsAppSendResult::failure(
+                        errorCode: 'TEMPLATE_LANGUAGE_MISMATCH',
+                        errorMessage: "Template '{$payload->templateName}' configured language is '{$configuredLanguage}', requested '{$payload->metadata['language_code']}'.",
+                        isRetryable: false
+                    );
+                }
+            }
+
+            // Parameter and component validation
+            if (is_array($templateDef)) {
+                $paramCount = count($payload->templateParameters ?? []);
+                if (isset($templateDef['required_param_count']) && $paramCount !== (int) $templateDef['required_param_count']) {
+                    return WhatsAppSendResult::failure(
+                        errorCode: 'TEMPLATE_PARAM_MISMATCH',
+                        errorMessage: "Template '{$payload->templateName}' requires {$templateDef['required_param_count']} parameters, got {$paramCount}.",
+                        isRetryable: false
+                    );
+                }
+                if (isset($templateDef['components']) && is_array($templateDef['components'])) {
+                    foreach ($templateDef['components'] as $component) {
+                        if (($component['type'] ?? '') === 'body' && isset($component['param_count'])) {
+                            if ($paramCount !== (int) $component['param_count']) {
+                                return WhatsAppSendResult::failure(
+                                    errorCode: 'TEMPLATE_PARAM_MISMATCH',
+                                    errorMessage: "Template '{$payload->templateName}' body requires {$component['param_count']} parameters, got {$paramCount}.",
+                                    isRetryable: false
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // Freeform text (strictly prohibited outside the active 24-hour customer service window)
+            $isSessionMessage = ($payload->messageType === WhatsAppMessage::TYPE_MERCHANT_QUERY_REPLY);
+            $inboundTimestamp = $payload->metadata['inbound_timestamp'] ?? null;
+            $isWithinWindow = $isSessionMessage;
+
+            if ($inboundTimestamp) {
+                $inboundTime = is_numeric($inboundTimestamp)
+                    ? Carbon::createFromTimestamp((int) $inboundTimestamp)
+                    : Carbon::parse($inboundTimestamp);
+                if ($inboundTime->diffInSeconds(now()) >= 86400) {
+                    $isWithinWindow = false;
+                }
+            }
+
+            if (! $isWithinWindow) {
+                return WhatsAppSendResult::failure(
+                    errorCode: 'FREEFORM_NOT_PERMITTED',
+                    errorMessage: 'Free-form text is strictly prohibited outside the active 24-hour customer service window. An approved template is required.',
                     isRetryable: false
                 );
             }
@@ -81,7 +203,7 @@ class MetaCloudWhatsAppProvider implements WhatsAppProviderInterface
 
         if (! empty($payload->templateName)) {
             $body['type'] = 'template';
-            $languageCode = $payload->metadata['language_code'] ?? 'id';
+            $languageCode = $payload->metadata['language_code'] ?? ($configuredLanguage ?? 'id');
 
             $components = [];
             if (! empty($payload->templateParameters)) {
@@ -106,12 +228,17 @@ class MetaCloudWhatsAppProvider implements WhatsAppProviderInterface
                 'components' => $components,
             ];
         } else {
-            // Freeform text (only valid within 24hr customer service window)
+            // Freeform text (within active 24hr customer service window)
             $body['type'] = 'text';
             $body['text'] = [
                 'preview_url' => false,
                 'body' => $payload->textBody ?? '',
             ];
+        }
+
+        $trackingId = $payload->metadata['message_id'] ?? ($payload->metadata['tracking_id'] ?? null);
+        if ($trackingId) {
+            $body['biz_opaque_callback_data'] = (string) $trackingId;
         }
 
         try {
@@ -177,7 +304,7 @@ class MetaCloudWhatsAppProvider implements WhatsAppProviderInterface
     /**
      * Verify credentials against Meta Graph API.
      */
-    public function verifyConnection(array $credentials, ?string $phoneNumberId = null, string $environment = 'sandbox'): array
+    public function verifyConnection(array $credentials, ?string $phoneNumberId = null, string $environment = 'sandbox', ?string $apiVersion = null): array
     {
         $accessToken = $credentials['access_token'] ?? null;
 
@@ -189,8 +316,16 @@ class MetaCloudWhatsAppProvider implements WhatsAppProviderInterface
             ];
         }
 
-        $apiVersion = config('services.whatsapp.meta.graph_version', self::DEFAULT_API_VERSION);
-        $url = "https://graph.facebook.com/{$apiVersion}/{$phoneNumberId}";
+        $version = $apiVersion ?? config('services.whatsapp.meta.graph_version', self::DEFAULT_API_VERSION);
+        if (! in_array($version, self::SUPPORTED_API_VERSIONS, true)) {
+            return [
+                'verified' => false,
+                'error_code' => 'UNSUPPORTED_API_VERSION',
+                'error_message' => "Unsupported or expired Meta Graph API version '{$version}'. Supported versions: ".implode(', ', self::SUPPORTED_API_VERSIONS),
+            ];
+        }
+
+        $url = "https://graph.facebook.com/{$version}/{$phoneNumberId}";
 
         try {
             $response = Http::withToken($accessToken)
@@ -309,7 +444,37 @@ class MetaCloudWhatsAppProvider implements WhatsAppProviderInterface
                         errorCode: $errorCode,
                         errorMessage: $errorMessage,
                         phoneNumberId: $phoneNumberId ? (string) $phoneNumberId : null,
-                        rawPayload: $statusItem
+                        rawPayload: $statusItem,
+                        isInbound: false,
+                        senderPhone: null,
+                        messageText: null,
+                        callbackData: $statusItem['biz_opaque_callback_data'] ?? null
+                    );
+                }
+
+                // Inbound customer/merchant messages
+                $messages = $value['messages'] ?? [];
+                foreach ($messages as $msgItem) {
+                    $msgId = $msgItem['id'] ?? null;
+                    $from = $msgItem['from'] ?? null;
+                    $textBody = $msgItem['text']['body'] ?? null;
+
+                    if (! $msgId || ! $from) {
+                        continue;
+                    }
+
+                    $events[] = new WhatsAppWebhookEvent(
+                        providerMessageId: (string) $msgId,
+                        status: 'inbound_message',
+                        timestamp: isset($msgItem['timestamp']) ? (string) $msgItem['timestamp'] : null,
+                        recipientPhone: null,
+                        errorCode: null,
+                        errorMessage: null,
+                        phoneNumberId: $phoneNumberId ? (string) $phoneNumberId : null,
+                        rawPayload: $msgItem,
+                        isInbound: true,
+                        senderPhone: (string) $from,
+                        messageText: $textBody
                     );
                 }
             }

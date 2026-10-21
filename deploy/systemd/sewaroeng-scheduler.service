@@ -1,0 +1,23 @@
+[Unit]
+Description=SeWaroeng Scheduled Task Runner
+After=network.target redis-server.service postgresql.service
+Documentation=https://github.com/dapzz-id/SeWaroeng
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/sewaroeng/backend
+
+# Executes Laravel console scheduler (respects withoutOverlapping via Redis mutex)
+ExecStart=/usr/bin/php /var/www/sewaroeng/backend/artisan schedule:run
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sewaroeng-scheduler

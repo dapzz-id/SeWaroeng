@@ -130,7 +130,9 @@ class WhatsAppWebhookController extends Controller
                     continue;
                 }
 
-                $updated = $this->notificationService->handleWebhookEvent($tenantId, $provider, $event);
+                $updated = $event->isInbound
+                    ? $this->notificationService->handleInboundMessage($tenantId, $provider, $event)
+                    : $this->notificationService->handleWebhookEvent($tenantId, $provider, $event);
                 if ($updated) {
                     $processed++;
                 }
@@ -206,7 +208,9 @@ class WhatsAppWebhookController extends Controller
             }
 
             $this->tenantManager->runForTenant($connection->tenant_id, function () use ($connection, $provider, $event, &$processed) {
-                $updated = $this->notificationService->handleWebhookEvent($connection->tenant_id, $provider, $event);
+                $updated = $event->isInbound
+                    ? $this->notificationService->handleInboundMessage($connection->tenant_id, $provider, $event)
+                    : $this->notificationService->handleWebhookEvent($connection->tenant_id, $provider, $event);
                 if ($updated) {
                     $processed++;
                 }

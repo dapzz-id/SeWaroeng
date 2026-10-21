@@ -151,6 +151,21 @@ class AppServiceProvider extends ServiceProvider
                     ],
                     'dedup_key' => "shift_variance:shift_{$shift->id}",
                 ]);
+
+                try {
+                    $tenant = $shift->tenant ?? Tenant::find($shift->tenant_id);
+                    if ($tenant) {
+                        $varianceFormatted = 'Rp '.number_format(abs($variance) / 100, 0, ',', '.');
+                        $desc = ($variance > 0 ? 'Kelebihan kas: ' : 'Kekurangan kas: ').$varianceFormatted." pada shift #{$shift->id}";
+                        app(WhatsAppNotificationService::class)->queueAnomalyAlert($tenant, 'Selisih Kas Shift', $desc, [
+                            'reference_id' => "shift_{$shift->id}",
+                            'shift_id' => $shift->id,
+                            'variance_minor' => $variance,
+                        ]);
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('WhatsApp anomaly alert dispatch failed on shift closed: '.$e->getMessage());
+                }
             }
         });
 

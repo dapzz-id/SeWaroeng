@@ -31,7 +31,7 @@ interface WhatsAppProviderInterface
      *     capabilities?: ?array<string, mixed>
      * }
      */
-    public function verifyConnection(array $credentials, ?string $phoneNumberId = null, string $environment = 'sandbox'): array;
+    public function verifyConnection(array $credentials, ?string $phoneNumberId = null, string $environment = 'sandbox', ?string $apiVersion = null): array;
 
     /**
      * Verify incoming webhook authenticity (signature/token).
